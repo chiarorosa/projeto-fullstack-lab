@@ -1,0 +1,415 @@
+"""
+Agent Compilation Engine
+Converts the visual graph JSON into Agno Team/workflow objects.
+"""
+
+import json
+import asyncio
+import os
+from typing import Any, AsyncIterator
+import httpx
+
+from core.llm_runtime import generate_llm_response
+from core.task_routing import route_task_to_agent
+
+
+async def _execute_openrouter_ai_tool(prompt: str) -> str:
+    """
+    Execute OpenRouter AI tool by calling the OpenRouter API.
+    Uses OpenAI-compatible endpoint format.
+    """
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY not configured in server environment")
+
+    base_url = os.environ.get("OPENROUTER_API_BASE_URL", "https://openrouter.ai/api/v1")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "model": "openrouter/auto",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 2048,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"OpenRouter API error: {response.status_code} - {response.text}"
+                )
+
+            result = response.json()
+            return result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+    except httpx.TimeoutException:
+        raise RuntimeError("OpenRouter API request timed out")
+    except httpx.HTTPError as e:
+        raise RuntimeError(f"OpenRouter API connection error: {str(e)}")
+
+
+def _build_agent_system_prompt(agent_cfg: dict[str, Any]) -> str:
+    role = str(agent_cfg.get("role") or "Agent")
+    goal = str(agent_cfg.get("goal") or "Complete the assigned task")
+    backstory = str(agent_cfg.get("backstory") or "")
+    return (
+        f"You are {role}.\n"
+        f"Primary goal: {goal}.\n"
+        f"Backstory/context: {backstory}.\n"
+        "Answer clearly, focusing only on the assigned task."
+    )
+
+
+def _friendly_provider_error(raw_message: str, provider: str, model: str) -> str:
+    text = raw_message.strip()
+    lower = text.lower()
+
+    if "401" in lower:
+        return (
+            f"{provider}/{model} authentication failed (401). "
+            "Check API Key in the connected LLM node and validate with 'Test Provider'."
+        )
+
+    if "network error" in lower or "connection" in lower:
+        return (
+            f"{provider}/{model} connection failed. "
+            "Check network access and Base URL in LLM Properties."
+        )
+
+    if "api key" in lower and "required" in lower:
+        return (
+            f"{provider}/{model} API key missing. "
+            "Configure API Key in the LLM node or server environment variable."
+        )
+
+    return text
+
+
+def _build_execution_user_prompt(task_text: str, tool_context: str) -> str:
+    if tool_context:
+        return (
+            f"Task:\n{task_text}\n\n"
+            "Tool observations:\n"
+            f"{tool_context}\n\n"
+            "Produce the best possible final output for this task."
+        )
+    return (
+        f"Task:\n{task_text}\n\nProduce the best possible final output for this task."
+    )
+
+
+def _build_agent_config(agent_node: dict, llm_nodes: dict, tool_nodes: dict) -> dict:
+    """Parse a single agent node into agent configuration."""
+    data = agent_node.get("data", {})
+    agent_id = agent_node["id"]
+
+    # Find connected LLM
+    llm_config = None
+    missing_llm_connection = False
+    connected_llm_id = data.get("connectedLlm")
+    if connected_llm_id and connected_llm_id in llm_nodes:
+        llm_data = llm_nodes[connected_llm_id].get("data", {})
+        provider = llm_data.get("provider", "openai")
+
+        # Map legacy provider values to new unified providers
+        # Backward compatibility: ollama/lmstudio -> local
+        if provider in ["ollama", "lmstudio"]:
+            provider = "local"
+
+        llm_config = {
+            "provider": provider,
+            "model": llm_data.get("model", "gpt-4o-mini"),
+            "api_key": llm_data.get("apiKey", ""),
+            "base_url": llm_data.get("baseUrl"),
+        }
+    else:
+        missing_llm_connection = True
+
+    # Find connected Tools
+    connected_tools = []
+    for tool_id in data.get("connectedTools", []):
+        if tool_id in tool_nodes:
+            tool_data = tool_nodes[tool_id].get("data", {})
+            connected_tools.append(
+                {
+                    "name": tool_data.get("name", "unknown"),
+                    "type": tool_data.get("toolType", "web_search"),
+                }
+            )
+
+    return {
+        "id": agent_id,
+        "role": data.get("role", "Agent"),
+        "goal": data.get("goal", "Complete the assigned task."),
+        "backstory": data.get("backstory", "A capable AI agent."),
+        "llm": llm_config,
+        "eligible": llm_config is not None,
+        "skip_reason": "missing_llm_connection" if missing_llm_connection else None,
+        "tools": connected_tools,
+    }
+
+
+def compile_graph(graph_json: dict) -> dict:
+    """
+    Compile the ReactFlow graph JSON into an execution plan.
+    Returns an ordered list of agent configs based on the edge connections.
+    """
+    nodes = graph_json.get("nodes", [])
+    edges = graph_json.get("edges", [])
+
+    task_nodes = {n["id"]: n for n in nodes if n.get("type") == "taskNode"}
+    agent_nodes = {n["id"]: n for n in nodes if n.get("type") == "agentNode"}
+    llm_nodes = {n["id"]: n for n in nodes if n.get("type") == "llmNode"}
+    tool_nodes = {n["id"]: n for n in nodes if n.get("type") == "toolNode"}
+
+    task_connected_agent_ids: list[str] = []
+
+    # Build adjacency for agent->agent edges
+    agent_edges = [
+        e for e in edges if e["source"] in agent_nodes and e["target"] in agent_nodes
+    ]
+
+    # Topological sort of agents
+    in_degree = {aid: 0 for aid in agent_nodes}
+    successors = {aid: [] for aid in agent_nodes}
+    for e in agent_edges:
+        in_degree[e["target"]] += 1
+        successors[e["source"]].append(e["target"])
+
+    queue = [aid for aid, deg in in_degree.items() if deg == 0]
+    ordered_agents = []
+    while queue:
+        aid = queue.pop(0)
+        ordered_agents.append(aid)
+        for succ in successors[aid]:
+            in_degree[succ] -= 1
+            if in_degree[succ] == 0:
+                queue.append(succ)
+
+    # Attach LLM/Tool connections from edges
+    for edge in edges:
+        src = edge["source"]
+        tgt = edge["target"]
+        if src in llm_nodes and tgt in agent_nodes:
+            agent_nodes[tgt]["data"]["connectedLlm"] = src
+        if src in tool_nodes and tgt in agent_nodes:
+            agent_nodes[tgt]["data"].setdefault("connectedTools", []).append(src)
+        if src in task_nodes and tgt in agent_nodes:
+            task_connected_agent_ids.append(tgt)
+
+    compiled_agents = [
+        _build_agent_config(agent_nodes[aid], llm_nodes, tool_nodes)
+        for aid in ordered_agents
+    ]
+
+    return {
+        "agents": compiled_agents,
+        "execution_order": ordered_agents,
+        "task_connected_agent_ids": task_connected_agent_ids,
+        "has_task_node": bool(task_nodes),
+    }
+
+
+async def execute_team(compiled: dict, task_input: str) -> AsyncIterator[str]:
+    """
+    Execute agents sequentially. Yields Server-Sent Event strings.
+    This is a simulation that can be wired to real Agno agents.
+    """
+    agents = compiled["agents"]
+    context = task_input
+
+    for i, agent_cfg in enumerate(agents):
+        role = agent_cfg["role"]
+        llm_info = agent_cfg.get("llm")
+        llm_label = (
+            f"{llm_info['provider']}/{llm_info['model']}" if llm_info else "default LLM"
+        )
+
+        yield f"data: {json.dumps({'type': 'agent_start', 'agent': role, 'llm': llm_label, 'index': i})}\n\n"
+        await asyncio.sleep(0.1)
+
+        # Execute connected tools
+        tools = agent_cfg.get("tools", [])
+        tool_results = []
+        for tool in tools:
+            tool_type = tool.get("type")
+            tool_name = tool.get("name")
+
+            if tool_type == "openrouter_ai":
+                try:
+                    result = await _execute_openrouter_ai_tool(context)
+                    tool_results.append({"tool": tool_name, "result": result})
+                    yield f"data: {json.dumps({'type': 'tool_executed', 'tool': tool_name, 'result': result})}\n\n"
+                except Exception as e:
+                    error_msg = str(e)
+                    tool_results.append({"tool": tool_name, "error": error_msg})
+                    yield f"data: {json.dumps({'type': 'tool_error', 'tool': tool_name, 'error': error_msg})}\n\n"
+
+        # In a real implementation, instantiate Agno agent here:
+        # agent = agno.Agent(role=role, goal=goal, model=Model(...))
+        # response = await agent.arun(context)
+        # For now, emit a simulated response
+        tool_context = ""
+        if tool_results:
+            for tr in tool_results:
+                if "result" in tr:
+                    tool_context += f"\n[Tool: {tr['tool']}] {tr['result']}\n"
+                elif "error" in tr:
+                    tool_context += f"\n[Tool: {tr['tool']}] Error: {tr['error']}\n"
+
+        simulated_output = (
+            f"[{role}] Processed task using {llm_label}: '{context[:200]}'"
+            + (f" with tools: {tool_context}" if tool_context else "")
+            + f" → Output from {role} is ready."
+        )
+        context = simulated_output  # Pass output as next agent's input
+
+        yield f"data: {json.dumps({'type': 'agent_output', 'agent': role, 'output': simulated_output})}\n\n"
+        await asyncio.sleep(0.2)
+
+    yield f"data: {json.dumps({'type': 'done', 'final_output': context})}\n\n"
+
+
+async def execute_team_tasks(
+    compiled: dict, task_inputs: list[str]
+) -> AsyncIterator[str]:
+    """
+    Execute one or many tasks. Emits routing metadata per task and
+    only activates agents with valid LLM connection.
+    """
+    all_agents = compiled.get("agents", [])
+    task_connected_ids = set(compiled.get("task_connected_agent_ids", []))
+    if compiled.get("has_task_node") and not task_connected_ids:
+        all_agents = []
+    elif task_connected_ids:
+        all_agents = [
+            agent for agent in all_agents if agent.get("id") in task_connected_ids
+        ]
+
+    eligible_agents = [agent for agent in all_agents if agent.get("eligible")]
+    skipped_agents = [
+        {
+            "id": agent.get("id"),
+            "agent": agent.get("role"),
+            "reason": agent.get("skip_reason") or "not_eligible",
+        }
+        for agent in all_agents
+        if not agent.get("eligible")
+    ]
+
+    for task_index, task_text in enumerate(task_inputs):
+        routing_event = {
+            "type": "task_start",
+            "task_index": task_index,
+            "task_input": task_text,
+            "routing": {
+                "activated_agents": [
+                    {"id": agent.get("id"), "agent": agent.get("role")}
+                    for agent in eligible_agents
+                ],
+                "skipped_agents": skipped_agents,
+            },
+        }
+        yield f"data: {json.dumps(routing_event)}\n\n"
+
+        if not eligible_agents:
+            error_event = {
+                "type": "task_error",
+                "task_index": task_index,
+                "message": "No eligible agents available (all missing LLM connection).",
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+            continue
+
+        routing_decision = await route_task_to_agent(task_text, eligible_agents)
+        selected_agent_id = routing_decision.get("selected_agent_id")
+        selected_agent = None
+        for candidate in eligible_agents:
+            if candidate.get("id") == selected_agent_id:
+                selected_agent = candidate
+                break
+        if not selected_agent:
+            selected_agent = eligible_agents[0]
+
+        selected_llm = selected_agent.get("llm") or {}
+        llm_label = f"{selected_llm.get('provider', 'unknown')}/{selected_llm.get('model', 'unknown')}"
+
+        decision_event = {
+            "type": "routing_decision",
+            "task_index": task_index,
+            "selected_agent_id": selected_agent.get("id"),
+            "selected_agent": selected_agent.get("role"),
+            "selected_llm": {
+                "provider": selected_llm.get("provider"),
+                "model": selected_llm.get("model"),
+            },
+            "reason": routing_decision.get("reason"),
+            "scores": routing_decision.get("scores") or [],
+            "fallback_used": bool(routing_decision.get("fallback_used", False)),
+            "ineligible_agents": skipped_agents,
+        }
+        yield f"data: {json.dumps(decision_event)}\n\n"
+
+        role = selected_agent["role"]
+        yield f"data: {json.dumps({'type': 'agent_start', 'agent': role, 'llm': llm_label, 'index': 0, 'task_index': task_index})}\n\n"
+        await asyncio.sleep(0.05)
+
+        tools = selected_agent.get("tools", [])
+        tool_results = []
+        for tool in tools:
+            tool_type = tool.get("type")
+            tool_name = tool.get("name")
+
+            if tool_type == "openrouter_ai":
+                try:
+                    result = await _execute_openrouter_ai_tool(task_text)
+                    tool_results.append({"tool": tool_name, "result": result})
+                    yield f"data: {json.dumps({'type': 'tool_executed', 'tool': tool_name, 'result': result, 'task_index': task_index})}\n\n"
+                except Exception as e:
+                    error_msg = str(e)
+                    tool_results.append({"tool": tool_name, "error": error_msg})
+                    yield f"data: {json.dumps({'type': 'tool_error', 'tool': tool_name, 'error': error_msg, 'task_index': task_index})}\n\n"
+
+        tool_context = ""
+        if tool_results:
+            for tr in tool_results:
+                if "result" in tr:
+                    tool_context += f"\n[Tool: {tr['tool']}] {tr['result']}\n"
+                elif "error" in tr:
+                    tool_context += f"\n[Tool: {tr['tool']}] Error: {tr['error']}\n"
+
+        system_prompt = _build_agent_system_prompt(selected_agent)
+        user_prompt = _build_execution_user_prompt(task_text, tool_context)
+
+        try:
+            final_output = await generate_llm_response(
+                selected_llm,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+        except Exception as exc:
+            provider = str(selected_llm.get("provider") or "provider")
+            model = str(selected_llm.get("model") or "model")
+            friendly = _friendly_provider_error(str(exc), provider, model)
+            fail_event = {
+                "type": "task_error",
+                "task_index": task_index,
+                "message": f"Execution failed for {role}: {friendly}",
+            }
+            yield f"data: {json.dumps(fail_event)}\n\n"
+            continue
+
+        yield f"data: {json.dumps({'type': 'agent_output', 'agent': role, 'output': final_output, 'task_index': task_index})}\n\n"
+        await asyncio.sleep(0.08)
+
+        yield f"data: {json.dumps({'type': 'task_done', 'task_index': task_index, 'final_output': final_output})}\n\n"
+
+    yield f"data: {json.dumps({'type': 'done', 'final_output': 'All tasks processed.', 'total_tasks': len(task_inputs)})}\n\n"
