@@ -1,27 +1,27 @@
 # Visual Multi-Agent Team Builder
 
-Este e um repositorio contendo uma aplicacao Fullstack (Frontend e Backend) dedicada a construcao visual de equipes de agentes de Inteligencia Artificial. A aplicacao permite a definicao de fluxos de trabalho, orquestracao de agentes e configuracao de diferentes provedores de LLMs atraves de uma interface grafica baseada em nos estruturada para facilitar o desenvolvimento e execucao de casos de uso multi-agentes.
+Este é um repositório contendo uma aplicação Fullstack (Frontend e Backend) dedicada à construção visual de equipes de agentes de Inteligência Artificial. A aplicação permite a definição de fluxos de trabalho, orquestração de agentes e configuração de diferentes provedores de LLMs através de uma interface gráfica baseada em nós estruturada para facilitar o desenvolvimento e execução de casos de uso multi-agentes.
 
 ## Sobre o Projeto
 
-Este projeto tem como objetivo principal demonstrar um caso de estudo de desenvolvimento orientado a especificacoes (Spec-Driven Development - SDD). Todo o ciclo de vida deste projeto esta sendo guiado pela abordagem de SDD em conjunto com tecnologias avancadas de agentes autonomos.
+Este projeto tem como objetivo principal demonstrar um caso de estudo de desenvolvimento orientado a especificações (Spec-Driven Development - SDD). Todo o ciclo de vida deste projeto está sendo guiado pela abordagem de SDD em conjunto com tecnologias avançadas de agentes autônomos.
 
-As ferramentas em destaque utilizadas para o desenvolvimento deste laboratorio incluem:
-- Antigravity: Agente de IA avancado para automatizacao e paridade de programacao.
-- Opencode: Ferramentas auxiliares de integracao local do IDE.
-- Openspec: Especificacoes em formato estruturado que servem de "Single Source of Truth" para o agente autonomo.
+As ferramentas em destaque utilizadas para o desenvolvimento deste laboratório incluem:
+- Antigravity: Agente de IA avançado para automação e paridade de programação.
+- Opencode: Ferramentas auxiliares de integração local do IDE.
+- Openspec: Especificações em formato estruturado que servem de "Single Source of Truth" para o agente autônomo.
 
-Nota: Este arquivo README foi exigido estritamente sem o uso de caracteres graficos ("emojis") como parte das diretrizes de configuracao deste repositorio.
+Nota: Este arquivo README foi exigido estritamente sem o uso de caracteres gráficos ("emojis") como parte das diretrizes de configuração deste repositório.
 
 ## Arquitetura
 
-O repositorio esta estruturado em modulos distintos:
-- `/frontend`: Interface grafica desenvolvida com uma stack web moderna, focada no fluxo de trabalho baseado na arquitetura visual de nos.
-- `/backend`: Servidor REST construido em Python, responsavel por inicializar os agentes, orquestrar fluxos e gerenciar os provedores de servicos de LLM e logica de roteamento de tarefas.
-- `/openspec`: Documentos textuais delineando especificacoes operacionais e especificacoes arquiteturais consumidas pelas ferramentas SDD.
+O repositório está estruturado em módulos distintos:
+- `/frontend`: Interface gráfica desenvolvida com uma stack web moderna, focada no fluxo de trabalho baseado na arquitetura visual de nós.
+- `/backend`: Servidor REST construído em Python, responsável por inicializar os agentes, orquestrar fluxos e gerenciar os provedores de serviços de LLM e lógica de roteamento de tarefas.
+- `/openspec`: Documentos textuais delineando especificações operacionais e especificações arquiteturais consumidas pelas ferramentas SDD.
 
 ## Como Iniciar
 
-1. Navegue ate as pastas correspondentes (/frontend ou /backend).
-2. Siga os requisitos de instalacao e dependencias de pacote locais em casa subprojeto.
-3. Inicie  os dev servers a partir de seus conteudos instalados.
+1. Navegue até as pastas correspondentes (/frontend ou /backend).
+2. Siga os requisitos de instalação e dependências de pacote locais em cada subprojeto.
+3. Inicie os servidores de desenvolvimento a partir de seus conteúdos instalados.
