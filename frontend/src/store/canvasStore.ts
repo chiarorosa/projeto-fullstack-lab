@@ -12,7 +12,7 @@ import {
   applyEdgeChanges,
 } from '@xyflow/react';
 
-export type NodeType = 'taskNode' | 'agentNode' | 'llmNode' | 'toolNode';
+export type NodeType = 'taskNode' | 'agentNode' | 'llmNode';
 
 export interface TaskData {
   label: string;
@@ -27,7 +27,6 @@ export interface AgentData {
   goal: string;
   backstory: string;
   connectedLlm?: string;
-  connectedTools?: string[];
   executable?: boolean;
   executionReason?: string;
   [key: string]: unknown;
@@ -43,14 +42,7 @@ export interface LLMData {
   [key: string]: unknown;
 }
 
-export interface ToolData {
-  label: string;
-  name: string;
-  toolType: string;
-  [key: string]: unknown;
-}
-
-export type AppNode = Node<TaskData | AgentData | LLMData | ToolData, NodeType>;
+export type AppNode = Node<TaskData | AgentData | LLMData, NodeType>;
 
 interface CanvasStore {
   nodes: AppNode[];
@@ -63,7 +55,7 @@ interface CanvasStore {
   setNodes: (nodes: AppNode[]) => void;
   setEdges: (edges: Edge[]) => void;
   addNode: (node: AppNode) => void;
-  updateNodeData: (id: string, data: Partial<TaskData | AgentData | LLMData | ToolData>) => void;
+  updateNodeData: (id: string, data: Partial<TaskData | AgentData | LLMData>) => void;
   selectNode: (id: string | null) => void;
   clearCanvas: () => void;
   loadGraph: (nodes: AppNode[], edges: Edge[]) => void;

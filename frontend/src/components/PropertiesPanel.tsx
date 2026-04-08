@@ -1,7 +1,7 @@
 import React from 'react';
-import { X, Bot, Cpu, Wrench, Loader2, ListTodo } from 'lucide-react';
+import { X, Bot, Cpu, Loader2, ListTodo } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
-import type { AgentData, LLMData, TaskData, ToolData } from '../store/canvasStore';
+import type { AgentData, LLMData, TaskData } from '../store/canvasStore';
 import { llmApi } from '../api/client';
 
 const PROVIDERS = [
@@ -71,15 +71,6 @@ const PROVIDER_METADATA: Record<ProviderValue, ProviderMetadata> = {
   },
 };
 
-const TOOL_TYPES = [
-  { value: 'web_search', label: 'Web Search' },
-  { value: 'calculator', label: 'Calculator' },
-  { value: 'document', label: 'Document Reader' },
-  { value: 'code', label: 'Code Executor' },
-  { value: 'search', label: 'Vector Search' },
-  { value: 'openrouter_ai', label: 'OpenRouter AI' },
-];
-
 const PropertiesPanel: React.FC = () => {
   const { nodes, edges, selectedNodeId, updateNodeData, selectNode } = useCanvasStore();
 
@@ -96,14 +87,6 @@ const PropertiesPanel: React.FC = () => {
       })?.source
     : undefined;
 
-  const connectedToolCount = node.type === 'agentNode'
-    ? edges.filter((edge) => {
-        if (edge.target !== node.id) return false;
-        const sourceNode = nodes.find((candidate) => candidate.id === edge.source);
-        return sourceNode?.type === 'toolNode';
-      }).length
-    : 0;
-
   return (
     <aside className="properties-panel">
       <div className="panel-header">
@@ -111,12 +94,10 @@ const PropertiesPanel: React.FC = () => {
           {node.type === 'agentNode' && <Bot size={16} className="panel-icon agent-icon" />}
           {node.type === 'taskNode' && <ListTodo size={16} className="panel-icon task-icon" />}
           {node.type === 'llmNode' && <Cpu size={16} className="panel-icon llm-icon" />}
-          {node.type === 'toolNode' && <Wrench size={16} className="panel-icon tool-icon" />}
           <span className="panel-title">
             {node.type === 'agentNode' && 'Agent Properties'}
             {node.type === 'taskNode' && 'Task Properties'}
             {node.type === 'llmNode' && 'LLM Properties'}
-            {node.type === 'toolNode' && 'Tool Properties'}
           </span>
         </div>
         <button className="panel-close" onClick={() => selectNode(null)}>
@@ -131,7 +112,6 @@ const PropertiesPanel: React.FC = () => {
             data={node.data as AgentData}
             onChange={updateNodeData}
             connectedLlmId={connectedLlmId}
-            connectedToolCount={connectedToolCount}
           />
         )}
         {node.type === 'taskNode' && (
@@ -139,9 +119,6 @@ const PropertiesPanel: React.FC = () => {
         )}
         {node.type === 'llmNode' && (
           <LLMForm id={node.id} data={node.data as LLMData} onChange={updateNodeData} />
-        )}
-        {node.type === 'toolNode' && (
-          <ToolForm id={node.id} data={node.data as ToolData} onChange={updateNodeData} />
         )}
       </div>
     </aside>
@@ -153,8 +130,7 @@ const AgentForm: React.FC<{
   data: AgentData;
   onChange: any;
   connectedLlmId?: string;
-  connectedToolCount: number;
-}> = ({ id, data, onChange, connectedLlmId, connectedToolCount }) => (
+}> = ({ id, data, onChange, connectedLlmId }) => (
   <div className="form-fields">
     <label className="field-label">Role (System Prompt Title)
       <input
@@ -186,9 +162,6 @@ const AgentForm: React.FC<{
       {connectedLlmId
         ? `LLM connected: ${connectedLlmId}`
         : 'No LLM connected. This agent will not execute.'}
-    </div>
-    <div className="field-hint">
-      Tools connected: {connectedToolCount}
     </div>
   </div>
 );
@@ -370,29 +343,5 @@ const LLMForm: React.FC<{ id: string; data: LLMData; onChange: any }> = ({ id, d
     </div>
   );
 };
-
-const ToolForm: React.FC<{ id: string; data: ToolData; onChange: any }> = ({ id, data, onChange }) => (
-  <div className="form-fields">
-    <label className="field-label">Tool Name
-      <input
-        className="field-input"
-        value={data.name || ''}
-        onChange={(e) => onChange(id, { name: e.target.value })}
-        placeholder="e.g., Web Search"
-      />
-    </label>
-    <label className="field-label">Tool Type
-      <select
-        className="field-select"
-        value={data.toolType || 'web_search'}
-        onChange={(e) => onChange(id, { toolType: e.target.value })}
-      >
-        {TOOL_TYPES.map((t) => (
-          <option key={t.value} value={t.value}>{t.label}</option>
-        ))}
-      </select>
-    </label>
-  </div>
-);
 
 export default PropertiesPanel;
