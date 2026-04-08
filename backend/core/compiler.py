@@ -5,55 +5,10 @@ Converts the visual graph JSON into Agno Team/workflow objects.
 
 import json
 import asyncio
-import os
 from typing import Any, AsyncIterator
-import httpx
 
 from core.llm_runtime import generate_llm_response
 from core.task_routing import route_task_to_agent
-
-
-async def _execute_openrouter_ai_tool(prompt: str) -> str:
-    """
-    Execute OpenRouter AI tool by calling the OpenRouter API.
-    Uses OpenAI-compatible endpoint format.
-    """
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    if not api_key:
-        raise ValueError("OPENROUTER_API_KEY not configured in server environment")
-
-    base_url = os.environ.get("OPENROUTER_API_BASE_URL", "https://openrouter.ai/api/v1")
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": "openrouter/auto",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 2048,
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            )
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"OpenRouter API error: {response.status_code} - {response.text}"
-                )
-
-            result = response.json()
-            return result.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-    except httpx.TimeoutException:
-        raise RuntimeError("OpenRouter API request timed out")
-    except httpx.HTTPError as e:
-        raise RuntimeError(f"OpenRouter API connection error: {str(e)}")
 
 
 def _build_agent_system_prompt(agent_cfg: dict[str, Any]) -> str:
@@ -93,20 +48,13 @@ def _friendly_provider_error(raw_message: str, provider: str, model: str) -> str
     return text
 
 
-def _build_execution_user_prompt(task_text: str, tool_context: str) -> str:
-    if tool_context:
-        return (
-            f"Task:\n{task_text}\n\n"
-            "Tool observations:\n"
-            f"{tool_context}\n\n"
-            "Produce the best possible final output for this task."
-        )
+def _build_execution_user_prompt(task_text: str) -> str:
     return (
         f"Task:\n{task_text}\n\nProduce the best possible final output for this task."
     )
 
 
-def _build_agent_config(agent_node: dict, llm_nodes: dict, tool_nodes: dict) -> dict:
+def _build_agent_config(agent_node: dict, llm_nodes: dict) -> dict:
     """Parse a single agent node into agent configuration."""
     data = agent_node.get("data", {})
     agent_id = agent_node["id"]
@@ -133,18 +81,6 @@ def _build_agent_config(agent_node: dict, llm_nodes: dict, tool_nodes: dict) -> 
     else:
         missing_llm_connection = True
 
-    # Find connected Tools
-    connected_tools = []
-    for tool_id in data.get("connectedTools", []):
-        if tool_id in tool_nodes:
-            tool_data = tool_nodes[tool_id].get("data", {})
-            connected_tools.append(
-                {
-                    "name": tool_data.get("name", "unknown"),
-                    "type": tool_data.get("toolType", "web_search"),
-                }
-            )
-
     return {
         "id": agent_id,
         "role": data.get("role", "Agent"),
@@ -153,7 +89,6 @@ def _build_agent_config(agent_node: dict, llm_nodes: dict, tool_nodes: dict) -> 
         "llm": llm_config,
         "eligible": llm_config is not None,
         "skip_reason": "missing_llm_connection" if missing_llm_connection else None,
-        "tools": connected_tools,
     }
 
 
@@ -168,7 +103,6 @@ def compile_graph(graph_json: dict) -> dict:
     task_nodes = {n["id"]: n for n in nodes if n.get("type") == "taskNode"}
     agent_nodes = {n["id"]: n for n in nodes if n.get("type") == "agentNode"}
     llm_nodes = {n["id"]: n for n in nodes if n.get("type") == "llmNode"}
-    tool_nodes = {n["id"]: n for n in nodes if n.get("type") == "toolNode"}
 
     task_connected_agent_ids: list[str] = []
 
@@ -194,20 +128,17 @@ def compile_graph(graph_json: dict) -> dict:
             if in_degree[succ] == 0:
                 queue.append(succ)
 
-    # Attach LLM/Tool connections from edges
+    # Attach LLM connections from edges
     for edge in edges:
         src = edge["source"]
         tgt = edge["target"]
         if src in llm_nodes and tgt in agent_nodes:
             agent_nodes[tgt]["data"]["connectedLlm"] = src
-        if src in tool_nodes and tgt in agent_nodes:
-            agent_nodes[tgt]["data"].setdefault("connectedTools", []).append(src)
         if src in task_nodes and tgt in agent_nodes:
             task_connected_agent_ids.append(tgt)
 
     compiled_agents = [
-        _build_agent_config(agent_nodes[aid], llm_nodes, tool_nodes)
-        for aid in ordered_agents
+        _build_agent_config(agent_nodes[aid], llm_nodes) for aid in ordered_agents
     ]
 
     return {
@@ -236,38 +167,12 @@ async def execute_team(compiled: dict, task_input: str) -> AsyncIterator[str]:
         yield f"data: {json.dumps({'type': 'agent_start', 'agent': role, 'llm': llm_label, 'index': i})}\n\n"
         await asyncio.sleep(0.1)
 
-        # Execute connected tools
-        tools = agent_cfg.get("tools", [])
-        tool_results = []
-        for tool in tools:
-            tool_type = tool.get("type")
-            tool_name = tool.get("name")
-
-            if tool_type == "openrouter_ai":
-                try:
-                    result = await _execute_openrouter_ai_tool(context)
-                    tool_results.append({"tool": tool_name, "result": result})
-                    yield f"data: {json.dumps({'type': 'tool_executed', 'tool': tool_name, 'result': result})}\n\n"
-                except Exception as e:
-                    error_msg = str(e)
-                    tool_results.append({"tool": tool_name, "error": error_msg})
-                    yield f"data: {json.dumps({'type': 'tool_error', 'tool': tool_name, 'error': error_msg})}\n\n"
-
         # In a real implementation, instantiate Agno agent here:
         # agent = agno.Agent(role=role, goal=goal, model=Model(...))
         # response = await agent.arun(context)
         # For now, emit a simulated response
-        tool_context = ""
-        if tool_results:
-            for tr in tool_results:
-                if "result" in tr:
-                    tool_context += f"\n[Tool: {tr['tool']}] {tr['result']}\n"
-                elif "error" in tr:
-                    tool_context += f"\n[Tool: {tr['tool']}] Error: {tr['error']}\n"
-
         simulated_output = (
             f"[{role}] Processed task using {llm_label}: '{context[:200]}'"
-            + (f" with tools: {tool_context}" if tool_context else "")
             + f" → Output from {role} is ready."
         )
         context = simulated_output  # Pass output as next agent's input
@@ -362,32 +267,8 @@ async def execute_team_tasks(
         yield f"data: {json.dumps({'type': 'agent_start', 'agent': role, 'llm': llm_label, 'index': 0, 'task_index': task_index})}\n\n"
         await asyncio.sleep(0.05)
 
-        tools = selected_agent.get("tools", [])
-        tool_results = []
-        for tool in tools:
-            tool_type = tool.get("type")
-            tool_name = tool.get("name")
-
-            if tool_type == "openrouter_ai":
-                try:
-                    result = await _execute_openrouter_ai_tool(task_text)
-                    tool_results.append({"tool": tool_name, "result": result})
-                    yield f"data: {json.dumps({'type': 'tool_executed', 'tool': tool_name, 'result': result, 'task_index': task_index})}\n\n"
-                except Exception as e:
-                    error_msg = str(e)
-                    tool_results.append({"tool": tool_name, "error": error_msg})
-                    yield f"data: {json.dumps({'type': 'tool_error', 'tool': tool_name, 'error': error_msg, 'task_index': task_index})}\n\n"
-
-        tool_context = ""
-        if tool_results:
-            for tr in tool_results:
-                if "result" in tr:
-                    tool_context += f"\n[Tool: {tr['tool']}] {tr['result']}\n"
-                elif "error" in tr:
-                    tool_context += f"\n[Tool: {tr['tool']}] Error: {tr['error']}\n"
-
         system_prompt = _build_agent_system_prompt(selected_agent)
-        user_prompt = _build_execution_user_prompt(task_text, tool_context)
+        user_prompt = _build_execution_user_prompt(task_text)
 
         try:
             final_output = await generate_llm_response(

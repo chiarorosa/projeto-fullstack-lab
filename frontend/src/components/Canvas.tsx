@@ -13,14 +13,12 @@ import { useCanvasStore } from '../store/canvasStore';
 import TaskNode from './nodes/TaskNode';
 import AgentNode from './nodes/AgentNode';
 import LLMNode from './nodes/LLMNode';
-import ToolNode from './nodes/ToolNode';
 import type { AppNode } from '../store/canvasStore';
 
 const nodeTypes = {
   taskNode: TaskNode,
   agentNode: AgentNode,
   llmNode: LLMNode,
-  toolNode: ToolNode,
 };
 
 let idCounter = 100;
@@ -55,8 +53,6 @@ const Canvas: React.FC = () => {
         nodeData = { label, role: label, goal: '', backstory: '' };
       } else if (type === 'llmNode') {
         nodeData = { label, provider: meta.provider || 'openai', model: meta.model || 'gpt-4o-mini', apiKey: '' };
-      } else if (type === 'toolNode') {
-        nodeData = { label, name: label, toolType: meta.toolType || 'generic' };
       }
 
       const newNode: AppNode = {
@@ -83,7 +79,6 @@ const Canvas: React.FC = () => {
 
   const enrichedNodes = React.useMemo(() => {
     const agentIncomingLlm = new Map<string, string>();
-    const agentIncomingTools = new Map<string, string[]>();
     const llmConnectedAgents = new Map<string, string[]>();
 
     for (const edge of edges) {
@@ -97,22 +92,16 @@ const Canvas: React.FC = () => {
         llmConnectedAgents.set(sourceNode.id, [...list, targetNode.id]);
       }
 
-      if (sourceNode.type === 'toolNode' && targetNode.type === 'agentNode') {
-        const list = agentIncomingTools.get(targetNode.id) || [];
-        agentIncomingTools.set(targetNode.id, [...list, sourceNode.id]);
-      }
     }
 
     return nodes.map((node) => {
       if (node.type === 'agentNode') {
         const connectedLlm = agentIncomingLlm.get(node.id);
-        const connectedTools = agentIncomingTools.get(node.id) || [];
         return {
           ...node,
           data: {
             ...node.data,
             connectedLlm,
-            connectedTools,
             executable: Boolean(connectedLlm),
             executionReason: connectedLlm ? 'Ready' : 'Missing LLM connection',
           },

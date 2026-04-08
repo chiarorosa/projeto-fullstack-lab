@@ -45,15 +45,6 @@ const AgentNode = memo(({ id, data, selected }: NodeProps) => {
         className="handle-left"
         style={{ top: '50%' }}
       />
-      {/* Tool connection points (right side) */}
-      <Handle
-        type="target"
-        position={Position.Right}
-        id="tool-in"
-        className="handle-right"
-        style={{ top: '50%' }}
-      />
-
       {/* Output to next agent */}
       <Handle type="source" position={Position.Bottom} className="handle-bottom" />
     </div>

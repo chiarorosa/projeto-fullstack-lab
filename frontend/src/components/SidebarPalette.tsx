@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Cpu, Globe, Calculator, FileText, Code2, ListTodo } from 'lucide-react';
+import { Bot, Cpu, ListTodo } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import type { AppNode } from '../store/canvasStore';
 
@@ -26,15 +26,6 @@ const NODE_PALETTE = [
     category: 'LLM',
     items: [
       { type: 'llmNode', label: 'LLM Node', icon: <Cpu size={18} />, color: '#10a37f', meta: { provider: 'openai', model: 'gpt-4o-mini' } },
-    ],
-  },
-  {
-    category: 'Tools',
-    items: [
-      { type: 'toolNode', label: 'Web Search', icon: <Globe size={18} />, color: '#06b6d4', meta: { toolType: 'web_search' } },
-      { type: 'toolNode', label: 'Calculator', icon: <Calculator size={18} />, color: '#f59e0b', meta: { toolType: 'calculator' } },
-      { type: 'toolNode', label: 'Document Reader', icon: <FileText size={18} />, color: '#84cc16', meta: { toolType: 'document' } },
-      { type: 'toolNode', label: 'Code Executor', icon: <Code2 size={18} />, color: '#6366f1', meta: { toolType: 'code' } },
     ],
   },
 ];
@@ -67,8 +58,6 @@ const SidebarPalette: React.FC = () => {
         model: meta.model || 'gpt-4o-mini',
         apiKey: '',
       };
-    } else if (item.type === 'toolNode') {
-      nodeData = { label: item.label, name: item.label, toolType: meta.toolType || 'generic' };
     }
 
     const newNode: AppNode = {
