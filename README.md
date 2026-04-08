@@ -62,3 +62,15 @@ O backend estará executando em `http://localhost:8000`.
    npm run dev
    ```
 Por fim, basta acessar o sistema pelo seu navegador através da URL indicada no terminal (frequentemente `http://localhost:5173`).
+
+## Recomendações
+
+Para quem tiver interesse em testar a aplicação de maneira acessível e flexível, recomendamos a utilização dos modelos gratuitos disponibilizados pela OpenRouter.
+
+Você pode conferir a lista de modelos de inteligência artificial sem custo através do link:
+- [OpenRouter - Free Models](https://openrouter.ai/models?q=free)
+
+Para obter sua chave de acesso (API Key), basta gerá-la pelo painel:
+- [OpenRouter Keys](https://openrouter.ai/workspaces/default/keys)
+
+Com sua chave gerada, você poderá utilizá-la em quantos nós (nodes) de LLMs desejar nos fluxos de trabalho (workflows) da interface da aplicação.
