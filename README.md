@@ -20,8 +20,45 @@ O repositório está estruturado em módulos distintos:
 - `/backend`: Servidor REST construído em Python, responsável por inicializar os agentes, orquestrar fluxos e gerenciar os provedores de serviços de LLM e lógica de roteamento de tarefas.
 - `/openspec`: Documentos textuais delineando especificações operacionais e especificações arquiteturais consumidas pelas ferramentas SDD.
 
-## Como Iniciar
+## Instruções de Uso (Getting Started)
 
-1. Navegue até as pastas correspondentes (/frontend ou /backend).
-2. Siga os requisitos de instalação e dependências de pacote locais em cada subprojeto.
-3. Inicie os servidores de desenvolvimento a partir de seus conteúdos instalados.
+### Pré-requisitos
+- Node.js (versão 18 ou superior)
+- Python (versão 3.10 ou superior)
+
+### Configuração do Backend (FastAPI / Python)
+
+1. Abra um terminal e navegue para o diretório de backend:
+   ```ps1
+   cd backend
+   ```
+2. Crie e ative um ambiente virtual (opcional, porém recomendado):
+   ```ps1
+   python -m venv venv
+   .\venv\Scripts\activate
+   ```
+3. Instale as dependências necessárias:
+   ```ps1
+   pip install -r requirements.txt
+   ```
+4. Inicie o servidor localmente:
+   ```ps1
+   uvicorn main:app --reload --port 8000
+   ```
+O backend estará executando em `http://localhost:8000`.
+
+### Configuração do Frontend (Vite + Node)
+
+1. Abra um novo terminal na raiz do projeto e acesse o diretório frontend:
+   ```ps1
+   cd frontend
+   ```
+2. Instale as dependências listadas:
+   ```ps1
+   npm install
+   ```
+3. Execute o ambiente de desenvolvimento local:
+   ```ps1
+   npm run dev
+   ```
+Por fim, basta acessar o sistema pelo seu navegador através da URL indicada no terminal (frequentemente `http://localhost:5173`).
