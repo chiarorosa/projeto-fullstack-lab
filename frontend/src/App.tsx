@@ -8,6 +8,7 @@ import PropertiesPanel from './components/PropertiesPanel';
 import ExecutionLogs from './components/ExecutionLogs';
 import TeamManager from './components/TeamManager';
 import WebhookTestConsole from './components/WebhookTestConsole';
+import Button from './components/ui/Button';
 import { useCanvasStore } from './store/canvasStore';
 import { teamsApi, executeTeamStream } from './api/client';
 import type { LogEvent } from './components/ExecutionLogs';
@@ -169,24 +170,25 @@ function App() {
             <span>{agentCount} agent{agentCount !== 1 ? 's' : ''}</span>
           </div>
 
-          <button className="btn-ghost" onClick={() => setShowManager(true)}>
+          <Button variant="ghost" onClick={() => setShowManager(true)}>
             <FolderOpen size={16} />
             Teams
-          </button>
+          </Button>
 
-          <button className="btn-ghost" onClick={clearCanvas}>
+          <Button variant="ghost" onClick={clearCanvas}>
             <Trash2 size={16} />
             Clear
-          </button>
+          </Button>
 
-          <button
-            className="btn-primary run-btn"
+          <Button
+            variant="primary"
+            className="run-btn"
             onClick={handleSaveAndRun}
             disabled={agentCount === 0 || !hasSupportedBootstrap || !hasExecutableAgents}
           >
             <Play size={16} />
             Run Team
-          </button>
+          </Button>
         </nav>
       </header>
 

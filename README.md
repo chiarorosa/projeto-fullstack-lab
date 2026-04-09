@@ -2,6 +2,10 @@
 
 Este é um repositório contendo uma aplicação Fullstack (Frontend e Backend) dedicada à construção visual de equipes de agentes de Inteligência Artificial. A aplicação permite a definição de fluxos de trabalho, orquestração de agentes e configuração de diferentes provedores de LLMs através de uma interface gráfica baseada em nós estruturada para facilitar o desenvolvimento e execução de casos de uso multi-agentes.
 
+## Preview da Aplicação
+
+![Preview da aplicação](frontend/public/preview_app.png)
+
 ## Sobre o Projeto
 
 Este projeto tem como propósito apresentar, na prática, um estudo de caso baseado em desenvolvimento orientado a especificações (*Spec-Driven Development* — SDD). Ao longo de todo o seu ciclo de vida, as decisões de implementação, evolução e automação são conduzidas por essa abordagem, em conjunto com o uso de tecnologias avançadas baseadas em agentes autônomos.

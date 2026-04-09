@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { Cpu } from 'lucide-react';
@@ -17,15 +17,6 @@ const MODEL_LABELS: Record<string, string> = {
   'mistral-large': 'Mistral Large',
 };
 
-const PROVIDER_COLORS: Record<string, string> = {
-  openai: '#10a37f',
-  anthropic: '#d97706',
-  google: '#4285f4',
-  local: '#f472b6',
-  openrouter: '#8b5cf6',
-  opencode: '#8b5cf6',
-};
-
 const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
@@ -38,20 +29,19 @@ const PROVIDER_LABELS: Record<string, string> = {
 const LLMNode = memo(({ id, data, selected }: NodeProps) => {
   const llmData = data as LLMData;
   const selectNode = useCanvasStore((s) => s.selectNode);
-  const accentColor = PROVIDER_COLORS[llmData.provider] || '#7c3aed';
+  const providerClass = `provider-${llmData.provider || 'openai'}`;
   const connectedAgentCount = (llmData.connectedAgents || []).length;
 
   return (
     <div
-      className={`llm-node ${selected ? 'selected' : ''}`}
+      className={`llm-node ${providerClass} ${selected ? 'selected' : ''}`}
       onClick={() => selectNode(id)}
-      style={{ '--accent': accentColor } as React.CSSProperties}
     >
-      <div className="node-header llm-header" style={{ background: `${accentColor}22` }}>
-        <div className="node-icon" style={{ color: accentColor }}>
+      <div className="node-header llm-header">
+        <div className="node-icon">
           <Cpu size={16} />
         </div>
-        <span className="node-type-label" style={{ color: accentColor }}>LLM</span>
+        <span className="node-type-label">LLM</span>
       </div>
 
       <div className="node-body">
