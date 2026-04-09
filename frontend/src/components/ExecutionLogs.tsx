@@ -23,6 +23,13 @@ export interface LogEvent {
     activated_agents?: { id?: string; agent?: string }[];
     skipped_agents?: { id?: string; agent?: string; reason?: string }[];
   };
+  bootstrap?: {
+    source?: string;
+    trigger_id?: string;
+    timestamp?: string;
+    correlation_id?: string;
+    test_origin?: string;
+  };
   fallback_used?: boolean;
   reason?: string;
   selected_agent?: string;
@@ -41,6 +48,28 @@ interface ExecutionLogsProps {
   logs: LogEvent[];
   isRunning: boolean;
   onClose?: () => void;
+}
+
+function normalizeExecutionError(message: string): string {
+  const text = (message || '').trim();
+  const lower = text.toLowerCase();
+
+  if (lower.includes('openrouter key is valid') && lower.includes('429')) {
+    return text;
+  }
+
+  if (lower.includes('rate/usage limit reached') || (lower.includes('openrouter') && lower.includes('429'))) {
+    const marker = 'upstream detail:';
+    const markerIdx = lower.indexOf(marker);
+    const detail = markerIdx >= 0 ? text.slice(markerIdx + marker.length).trim() : text;
+    return `OpenRouter key is valid, but model execution failed (429): ${detail}`;
+  }
+
+  if (lower.includes('model access failed even though api key is valid')) {
+    return 'OpenRouter key is valid, but model access is currently blocked for this account/model.';
+  }
+
+  return text;
 }
 
 const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ logs, isRunning, onClose }) => {
@@ -89,6 +118,18 @@ const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ logs, isRunning, onClose 
                 <div>
                   <strong>Task #{(log.task_index ?? 0) + 1} started</strong>
                   <p className="log-final">{log.task_input}</p>
+                  {log.bootstrap?.source && (
+                    <p className="log-final">
+                      Source: {log.bootstrap.source}
+                      {log.bootstrap.trigger_id ? ` (${log.bootstrap.trigger_id})` : ''}
+                    </p>
+                  )}
+                  {log.bootstrap?.correlation_id && (
+                    <p className="log-final">Correlation: {log.bootstrap.correlation_id}</p>
+                  )}
+                  {log.bootstrap?.test_origin && (
+                    <p className="log-final">Origin: {log.bootstrap.test_origin}</p>
+                  )}
                 </div>
                 <div className="log-routing-summary">
                   <span>Activated: {log.routing?.activated_agents?.length || 0}</span>
@@ -134,7 +175,10 @@ const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ logs, isRunning, onClose 
             {log.type === 'task_error' && (
               <div className="log-error">
                 <AlertCircle size={14} />
-                <span>Task #{(log.task_index ?? 0) + 1}: {log.message || 'Task failed.'}</span>
+                <span>
+                  Task #{(log.task_index ?? 0) + 1}:{' '}
+                  {normalizeExecutionError(log.message || 'Task failed.')}
+                </span>
               </div>
             )}
 
@@ -158,7 +202,7 @@ const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ logs, isRunning, onClose 
             {log.type === 'error' && (
               <div className="log-error">
                 <AlertCircle size={14} />
-                <span>{log.message || 'An unknown error occurred.'}</span>
+                <span>{normalizeExecutionError(log.message || 'An unknown error occurred.')}</span>
               </div>
             )}
           </div>

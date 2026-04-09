@@ -1,8 +1,11 @@
 import json
+import asyncio
 import os
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
+
+from httpx import ASGITransport, AsyncClient
 
 
 class ProviderTestFlowTests(unittest.IsolatedAsyncioTestCase):
@@ -12,6 +15,8 @@ class ProviderTestFlowTests(unittest.IsolatedAsyncioTestCase):
         os.chdir(self._tmp_dir.name)
 
         os.environ["APP_ENV"] = "test"
+        os.environ["AUTH_ENABLED"] = "false"
+        os.environ["RATE_LIMIT_ENABLED"] = "false"
         os.environ["CREDENTIAL_ENCRYPTION_KEY"] = "test-encryption-key"
 
         from core import secrets
@@ -188,6 +193,72 @@ class ProviderTestFlowTests(unittest.IsolatedAsyncioTestCase):
             secret = await resolve_credential_secret(db, str(response.credential_ref))
             self.assertEqual(secret, "sk-new-secret")
 
+    async def test_openrouter_key_valid_but_model_limited_still_persists_credential(
+        self,
+    ) -> None:
+        from models.schemas import ProviderTestRequest, ProviderTestResponse
+        from routes.teams import test_llm_provider
+        from models.team import Team
+        from core.credentials import resolve_credential_secret
+        from sqlalchemy import select
+
+        team_id = await self._create_team(
+            {
+                "nodes": [
+                    {
+                        "id": "llm-or-1",
+                        "type": "llmNode",
+                        "data": {
+                            "provider": "openrouter",
+                            "model": "google/gemma-4-31b-it:free",
+                        },
+                    }
+                ],
+                "edges": [],
+            }
+        )
+
+        payload = ProviderTestRequest(
+            provider="openrouter",
+            api_key="or-test-key",
+            model="google/gemma-4-31b-it:free",
+            team_id=team_id,
+            node_id="llm-or-1",
+        )
+
+        provider_message = (
+            "OpenRouter key is valid, but model validation failed (429): "
+            "Rate limit exceeded: free-models-per-day."
+        )
+
+        with patch(
+            "routes.teams.test_provider_configuration",
+            new=AsyncMock(
+                return_value=ProviderTestResponse(ok=False, message=provider_message)
+            ),
+        ):
+            async with self.database.AsyncSessionLocal() as db:
+                response = await test_llm_provider(
+                    payload,
+                    _auth=None,
+                    _rate_limit=None,
+                    db=db,
+                )
+
+        self.assertFalse(response.ok)
+        self.assertTrue(str(response.credential_ref or "").startswith("cred_"))
+
+        async with self.database.AsyncSessionLocal() as db:
+            team_result = await db.execute(select(Team).where(Team.id == team_id))
+            team = team_result.scalar_one()
+            graph = json.loads(team.graph_json)
+            node_data = graph["nodes"][0]["data"]
+            self.assertEqual(node_data.get("credentialRef"), response.credential_ref)
+            self.assertNotIn("apiKey", node_data)
+
+            secret = await resolve_credential_secret(db, str(response.credential_ref))
+            self.assertEqual(secret, "or-test-key")
+
     async def test_successful_provider_test_rotates_existing_node_credential(
         self,
     ) -> None:
@@ -345,3 +416,422 @@ class ProviderTestFlowTests(unittest.IsolatedAsyncioTestCase):
             graph = json.loads(team.graph_json)
             node_data = graph["nodes"][0]["data"]
             self.assertEqual(node_data.get("credentialRef"), "cred_existing")
+
+    async def test_webhook_trigger_valid_unknown_and_malformed(self) -> None:
+        from main import app
+        from models.team import Team, TeamRun, WebhookTrigger
+        from sqlalchemy import select
+
+        graph = {
+            "nodes": [
+                {
+                    "id": "wh-1",
+                    "type": "webhookNode",
+                    "data": {
+                        "label": "Webhook",
+                        "webhookId": "wh_test_123",
+                        "method": "POST",
+                    },
+                },
+                {
+                    "id": "agent-1",
+                    "type": "agentNode",
+                    "data": {"role": "Agent", "goal": "Handle task", "backstory": ""},
+                },
+                {
+                    "id": "llm-1",
+                    "type": "llmNode",
+                    "data": {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "apiKey": "sk-test",
+                    },
+                },
+            ],
+            "edges": [
+                {"id": "e-1", "source": "wh-1", "target": "agent-1"},
+                {"id": "e-2", "source": "llm-1", "target": "agent-1"},
+            ],
+        }
+
+        async with self.database.AsyncSessionLocal() as db:
+            team = Team(
+                name="webhook-team", description="", graph_json=json.dumps(graph)
+            )
+            db.add(team)
+            await db.flush()
+            db.add(
+                WebhookTrigger(
+                    webhook_id="wh_test_123",
+                    team_id=int(team.id),
+                    node_id="wh-1",
+                )
+            )
+            await db.commit()
+
+        async def _fake_execute(_compiled, task_inputs, execution_context=None):
+            task_text = task_inputs[0] if task_inputs else ""
+            yield f"data: {json.dumps({'type': 'task_start', 'task_index': 0, 'task_input': task_text, 'routing': {'activated_agents': [{'id': 'agent-1', 'agent': 'Agent'}], 'skipped_agents': []}, 'bootstrap': execution_context or {}})}\n\n"
+            yield f"data: {json.dumps({'type': 'routing_decision', 'task_index': 0, 'selected_agent_id': 'agent-1', 'selected_agent': 'Agent', 'selected_llm': {'provider': 'openai', 'model': 'gpt-4o-mini'}, 'reason': 'test', 'scores': []})}\n\n"
+            yield f"data: {json.dumps({'type': 'task_done', 'task_index': 0, 'final_output': 'ok'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'final_output': 'done'})}\n\n"
+
+        with (
+            patch(
+                "routes.webhooks.hydrate_compiled_agent_secrets",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "core.compiler.generate_llm_response", new=AsyncMock(return_value="ok")
+            ),
+            patch("routes.webhooks.execute_team_tasks", new=_fake_execute),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(
+                transport=transport, base_url="http://testserver"
+            ) as client:
+                ok_response = await client.post(
+                    "/api/webhooks/wh_test_123",
+                    json={"task": "from webhook"},
+                    headers={
+                        "content-type": "application/json",
+                        "x-test-origin": "in-app-webhook-console",
+                    },
+                )
+                self.assertEqual(ok_response.status_code, 202)
+                payload = ok_response.json()
+                self.assertTrue(payload.get("ok"))
+                self.assertTrue(payload.get("execution_id"))
+                self.assertEqual(payload.get("trigger_id"), "wh_test_123")
+                self.assertEqual(payload.get("test_origin"), "in-app-webhook-console")
+
+                await asyncio.sleep(0.05)
+
+                not_found_response = await client.post(
+                    "/api/webhooks/wh_missing",
+                    json={"task": "nope"},
+                    headers={"content-type": "application/json"},
+                )
+                self.assertEqual(not_found_response.status_code, 404)
+
+                malformed_response = await client.post(
+                    "/api/webhooks/wh_test_123",
+                    json={"foo": "bar"},
+                    headers={"content-type": "application/json"},
+                )
+                self.assertEqual(malformed_response.status_code, 400)
+
+        async with self.database.AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(TeamRun).where(TeamRun.source == "webhook")
+            )
+            runs = result.scalars().all()
+            self.assertTrue(len(runs) >= 1)
+            self.assertEqual(runs[0].trigger_id, "wh_test_123")
+            self.assertTrue(runs[0].correlation_id)
+            self.assertIsNotNone(runs[0].trigger_timestamp)
+
+    async def test_bootstrap_compatibility_task_webhook_and_mixed_graphs(self) -> None:
+        from core.compiler import compile_graph, execute_team_tasks
+
+        async def collect_selected_agent_ids(graph: dict, source: str) -> list[str]:
+            compiled = compile_graph(graph)
+            selected_ids: list[str] = []
+            async for chunk in execute_team_tasks(
+                compiled,
+                ["do work"],
+                execution_context={
+                    "source": source,
+                    "trigger_id": "wh_ctx" if source == "webhook" else None,
+                    "timestamp": "2026-04-09T00:00:00Z",
+                    "correlation_id": "corr-1",
+                },
+            ):
+                if not chunk.startswith("data: "):
+                    continue
+                payload = json.loads(chunk[len("data: ") :].strip())
+                if payload.get("type") == "routing_decision":
+                    selected_ids.append(str(payload.get("selected_agent_id") or ""))
+            return selected_ids
+
+        task_only_graph = {
+            "nodes": [
+                {
+                    "id": "task-1",
+                    "type": "taskNode",
+                    "data": {"taskInput": "from task node", "taskInputs": []},
+                },
+                {
+                    "id": "agent-task",
+                    "type": "agentNode",
+                    "data": {
+                        "role": "Task Agent",
+                        "goal": "Task work",
+                        "backstory": "",
+                    },
+                },
+                {
+                    "id": "llm-task",
+                    "type": "llmNode",
+                    "data": {"provider": "openai", "model": "gpt-4o-mini"},
+                },
+            ],
+            "edges": [
+                {"id": "e1", "source": "task-1", "target": "agent-task"},
+                {"id": "e2", "source": "llm-task", "target": "agent-task"},
+            ],
+        }
+
+        webhook_only_graph = {
+            "nodes": [
+                {
+                    "id": "wh-1",
+                    "type": "webhookNode",
+                    "data": {"webhookId": "wh_abc", "method": "POST"},
+                },
+                {
+                    "id": "agent-wh",
+                    "type": "agentNode",
+                    "data": {
+                        "role": "Webhook Agent",
+                        "goal": "Webhook work",
+                        "backstory": "",
+                    },
+                },
+                {
+                    "id": "llm-wh",
+                    "type": "llmNode",
+                    "data": {"provider": "openai", "model": "gpt-4o-mini"},
+                },
+            ],
+            "edges": [
+                {"id": "e1", "source": "wh-1", "target": "agent-wh"},
+                {"id": "e2", "source": "llm-wh", "target": "agent-wh"},
+            ],
+        }
+
+        mixed_graph = {
+            "nodes": [
+                {
+                    "id": "task-1",
+                    "type": "taskNode",
+                    "data": {"taskInput": "from task node", "taskInputs": []},
+                },
+                {
+                    "id": "wh-1",
+                    "type": "webhookNode",
+                    "data": {"webhookId": "wh_mix", "method": "POST"},
+                },
+                {
+                    "id": "agent-task",
+                    "type": "agentNode",
+                    "data": {
+                        "role": "Task Agent",
+                        "goal": "Task work",
+                        "backstory": "",
+                    },
+                },
+                {
+                    "id": "agent-wh",
+                    "type": "agentNode",
+                    "data": {
+                        "role": "Webhook Agent",
+                        "goal": "Webhook work",
+                        "backstory": "",
+                    },
+                },
+                {
+                    "id": "llm-task",
+                    "type": "llmNode",
+                    "data": {"provider": "openai", "model": "gpt-4o-mini"},
+                },
+                {
+                    "id": "llm-wh",
+                    "type": "llmNode",
+                    "data": {"provider": "openai", "model": "gpt-4o-mini"},
+                },
+            ],
+            "edges": [
+                {"id": "e1", "source": "task-1", "target": "agent-task"},
+                {"id": "e2", "source": "wh-1", "target": "agent-wh"},
+                {"id": "e3", "source": "llm-task", "target": "agent-task"},
+                {"id": "e4", "source": "llm-wh", "target": "agent-wh"},
+            ],
+        }
+
+        with patch(
+            "core.compiler.generate_llm_response", new=AsyncMock(return_value="ok")
+        ):
+            task_selected = await collect_selected_agent_ids(task_only_graph, "task")
+            self.assertEqual(task_selected, ["agent-task"])
+
+            webhook_selected = await collect_selected_agent_ids(
+                webhook_only_graph, "webhook"
+            )
+            self.assertEqual(webhook_selected, ["agent-wh"])
+
+            mixed_task_selected = await collect_selected_agent_ids(mixed_graph, "task")
+            mixed_webhook_selected = await collect_selected_agent_ids(
+                mixed_graph, "webhook"
+            )
+            self.assertEqual(mixed_task_selected, ["agent-task"])
+            self.assertEqual(mixed_webhook_selected, ["agent-wh"])
+
+    async def test_openrouter_429_message_is_normalized_for_execution(self) -> None:
+        from core.compiler import _friendly_provider_error
+
+        raw = (
+            "openrouter rate/usage limit reached for selected model (429). "
+            "Retry shortly or switch model. Automatic fallback to openrouter/auto also failed. "
+            "Upstream detail: Rate limit exceeded: free-models-per-day"
+        )
+        normalized = _friendly_provider_error(
+            raw, "openrouter", "google/gemma-4-31b-it:free"
+        )
+
+        self.assertIn(
+            "OpenRouter key is valid, but model execution failed (429)", normalized
+        )
+        self.assertIn("Rate limit exceeded: free-models-per-day", normalized)
+
+    async def test_run_metadata_distinguishes_task_vs_webhook_sources(self) -> None:
+        from main import app
+        from models.team import Team, TeamRun, WebhookTrigger
+        from sqlalchemy import select
+
+        graph = {
+            "nodes": [
+                {
+                    "id": "task-1",
+                    "type": "taskNode",
+                    "data": {
+                        "label": "Task",
+                        "taskInput": "from task",
+                        "taskInputs": [],
+                    },
+                },
+                {
+                    "id": "wh-1",
+                    "type": "webhookNode",
+                    "data": {
+                        "label": "Webhook",
+                        "webhookId": "wh_meta_1",
+                        "method": "POST",
+                    },
+                },
+                {
+                    "id": "agent-task",
+                    "type": "agentNode",
+                    "data": {
+                        "role": "Task Agent",
+                        "goal": "Task goal",
+                        "backstory": "",
+                    },
+                },
+                {
+                    "id": "agent-wh",
+                    "type": "agentNode",
+                    "data": {
+                        "role": "Webhook Agent",
+                        "goal": "Webhook goal",
+                        "backstory": "",
+                    },
+                },
+                {
+                    "id": "llm-task",
+                    "type": "llmNode",
+                    "data": {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "apiKey": "sk-test",
+                    },
+                },
+                {
+                    "id": "llm-wh",
+                    "type": "llmNode",
+                    "data": {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "apiKey": "sk-test",
+                    },
+                },
+            ],
+            "edges": [
+                {"id": "e1", "source": "task-1", "target": "agent-task"},
+                {"id": "e2", "source": "wh-1", "target": "agent-wh"},
+                {"id": "e3", "source": "llm-task", "target": "agent-task"},
+                {"id": "e4", "source": "llm-wh", "target": "agent-wh"},
+            ],
+        }
+
+        async with self.database.AsyncSessionLocal() as db:
+            team = Team(
+                name="metadata-team", description="", graph_json=json.dumps(graph)
+            )
+            db.add(team)
+            await db.flush()
+            db.add(
+                WebhookTrigger(
+                    webhook_id="wh_meta_1",
+                    team_id=int(team.id),
+                    node_id="wh-1",
+                )
+            )
+            await db.commit()
+            team_id = int(team.id)
+
+        with (
+            patch(
+                "routes.teams.hydrate_compiled_agent_secrets",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "routes.webhooks.hydrate_compiled_agent_secrets",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "core.compiler.generate_llm_response", new=AsyncMock(return_value="ok")
+            ),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(
+                transport=transport, base_url="http://testserver"
+            ) as client:
+                task_response = await client.post(
+                    f"/api/teams/{team_id}/execute", json={}
+                )
+                self.assertEqual(task_response.status_code, 200)
+                _ = task_response.text
+
+                webhook_response = await client.post(
+                    "/api/webhooks/wh_meta_1",
+                    json={"task": "from webhook"},
+                    headers={
+                        "content-type": "application/json",
+                        "x-correlation-id": "corr-meta",
+                    },
+                )
+                self.assertEqual(webhook_response.status_code, 202)
+                await asyncio.sleep(0.08)
+
+        async with self.database.AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(TeamRun)
+                .where(TeamRun.team_id == team_id)
+                .order_by(TeamRun.created_at.asc(), TeamRun.id.asc())
+            )
+            runs = result.scalars().all()
+
+            task_runs = [r for r in runs if (r.source or "task") == "task"]
+            webhook_runs = [r for r in runs if r.source == "webhook"]
+
+            self.assertTrue(task_runs)
+            self.assertTrue(webhook_runs)
+
+            self.assertIsNone(task_runs[0].trigger_id)
+            self.assertIsNone(task_runs[0].trigger_timestamp)
+            self.assertEqual(task_runs[0].correlation_id, task_runs[0].execution_id)
+
+            self.assertEqual(webhook_runs[0].trigger_id, "wh_meta_1")
+            self.assertEqual(webhook_runs[0].correlation_id, "corr-meta")
+            self.assertIsNotNone(webhook_runs[0].trigger_timestamp)
