@@ -8,9 +8,10 @@ import type { Edge } from '@xyflow/react';
 
 interface TeamManagerProps {
   onClose: () => void;
+  onTeamLoaded?: (teamId: number) => void;
 }
 
-const TeamManager: React.FC<TeamManagerProps> = ({ onClose }) => {
+const TeamManager: React.FC<TeamManagerProps> = ({ onClose, onTeamLoaded }) => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(false);
   const [saveName, setSaveName] = useState('');
@@ -63,6 +64,7 @@ const TeamManager: React.FC<TeamManagerProps> = ({ onClose }) => {
 
   const handleLoad = (team: Team) => {
     loadGraph(team.graph_json.nodes as AppNode[], team.graph_json.edges as Edge[]);
+    onTeamLoaded?.(team.id);
     onClose();
   };
 

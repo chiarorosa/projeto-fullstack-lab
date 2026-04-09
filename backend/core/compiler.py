@@ -76,6 +76,7 @@ def _build_agent_config(agent_node: dict, llm_nodes: dict) -> dict:
             "provider": provider,
             "model": llm_data.get("model", "gpt-4o-mini"),
             "api_key": llm_data.get("apiKey", ""),
+            "credential_ref": llm_data.get("credentialRef"),
             "base_url": llm_data.get("baseUrl"),
         }
     else:

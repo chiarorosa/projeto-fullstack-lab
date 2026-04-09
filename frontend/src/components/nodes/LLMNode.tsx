@@ -60,6 +60,11 @@ const LLMNode = memo(({ id, data, selected }: NodeProps) => {
         </div>
         <div className="node-subtitle">{PROVIDER_LABELS[llmData.provider] || llmData.provider || 'OpenAI'}</div>
         <div className="node-subtitle">Connected agents: {connectedAgentCount}</div>
+        {!['local'].includes(llmData.provider || '') && (
+          <div className="node-subtitle">
+            Credential: {llmData.credentialRef ? 'stored' : 'not stored'}
+          </div>
+        )}
       </div>
 
       {/* Connects to Agent's left handle */}

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional
 
 import httpx
+
+from core.redaction import redact_text
 
 
 def _normalize_provider(provider: str) -> str:
@@ -25,6 +28,16 @@ def _normalize_base_url(provider: str, base_url: Optional[str]) -> str:
         "google": "https://generativelanguage.googleapis.com",
     }
     return defaults.get(provider, "https://api.openai.com/v1")
+
+
+def _build_openrouter_headers(api_key: str) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "HTTP-Referer": "http://localhost",
+        "X-Title": "AgentForge",
+    }
+    return headers
 
 
 def _extract_openai_like_content(payload: dict[str, Any]) -> str:
@@ -105,7 +118,7 @@ def _clean_error_text(response: httpx.Response) -> str:
         message = response.text or "Unknown provider error"
 
     compact = " ".join(str(message).split())
-    return compact[:260]
+    return redact_text(compact[:260])
 
 
 async def generate_llm_response(
@@ -126,26 +139,41 @@ async def generate_llm_response(
     if provider in {"openai", "openrouter", "local"}:
         endpoint = f"{base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
-        if api_key:
+        if provider == "openrouter" and api_key:
+            headers = _build_openrouter_headers(api_key)
+        elif api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
         payload = {
             "model": model,
             "temperature": 0.2,
+            "max_tokens": 700,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
         }
 
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(endpoint, headers=headers, json=payload)
+        async def _send_once(req_payload: dict[str, Any]) -> httpx.Response:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                return await client.post(endpoint, headers=headers, json=req_payload)
+
+        response = await _send_once(payload)
+
+        if provider == "openrouter" and response.status_code == 429:
+            await asyncio.sleep(1.0)
+            response = await _send_once(payload)
+
+        if provider == "openrouter" and response.status_code == 429:
+            fallback_payload = dict(payload)
+            fallback_payload["model"] = "openrouter/auto"
+            response = await _send_once(fallback_payload)
 
         if response.status_code < 200 or response.status_code >= 300:
             detail = _clean_error_text(response)
             if provider == "openrouter" and response.status_code in {401, 403}:
                 auth_endpoint = f"{base_url}/auth/key"
-                auth_headers = {"Authorization": f"Bearer {api_key}"}
+                auth_headers = _build_openrouter_headers(api_key)
                 try:
                     async with httpx.AsyncClient(timeout=timeout) as auth_client:
                         auth_response = await auth_client.get(
@@ -161,6 +189,12 @@ async def generate_llm_response(
                     raise
                 except Exception:
                     pass
+            if provider == "openrouter" and response.status_code == 429:
+                raise RuntimeError(
+                    "openrouter rate/usage limit reached for selected model (429). "
+                    "Retry shortly or switch model. Automatic fallback to openrouter/auto also failed. "
+                    f"Upstream detail: {detail}"
+                )
 
             raise RuntimeError(
                 f"{provider} completion failed ({response.status_code}): {detail}"

@@ -1,8 +1,24 @@
 import axios from 'axios';
 
+const rawApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+const API_BASE_URL = (rawApiBaseUrl && rawApiBaseUrl.length > 0
+  ? rawApiBaseUrl
+  : 'http://localhost:8000').replace(/\/$/, '');
+const API_BEARER_TOKEN = (import.meta.env.VITE_API_BEARER_TOKEN as string | undefined)?.trim();
+
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
+});
+
+api.interceptors.request.use((config) => {
+  if (API_BEARER_TOKEN) {
+    config.headers = config.headers || {};
+    if (!config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${API_BEARER_TOKEN}`;
+    }
+  }
+  return config;
 });
 
 export interface GraphData {
@@ -56,6 +72,7 @@ export type ProviderType = 'openai' | 'anthropic' | 'google' | 'local' | 'openro
 export interface ProviderTestRequest {
   provider: ProviderType;
   api_key?: string;
+  credential_ref?: string;
   model?: string;
   base_url?: string;
 }
@@ -84,9 +101,7 @@ export const teamsApi = {
     api.get<TeamRunsGrouped>(`/api/teams/${teamId}/runs/by-execution?limit=${limit}`),
   executeStream: (teamId: number, taskInput: string): EventSource => {
     // We hijack SSE via fetch manually so we can POST
-    return new EventSource(
-      `http://localhost:8000/api/teams/${teamId}/execute?task_input=${encodeURIComponent(taskInput)}`
-    );
+    return new EventSource(`${API_BASE_URL}/api/teams/${teamId}/execute?task_input=${encodeURIComponent(taskInput)}`);
   },
 };
 
@@ -103,9 +118,14 @@ export async function executeTeamStream(
   onError?: (err: any) => void
 ) {
   try {
-    const response = await fetch(`http://localhost:8000/api/teams/${teamId}/execute`, {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (API_BEARER_TOKEN) {
+      headers.Authorization = `Bearer ${API_BEARER_TOKEN}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/teams/${teamId}/execute`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
     });
 
