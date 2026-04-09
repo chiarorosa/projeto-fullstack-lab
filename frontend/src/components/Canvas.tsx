@@ -52,7 +52,13 @@ const Canvas: React.FC = () => {
       } else if (type === 'agentNode') {
         nodeData = { label, role: label, goal: '', backstory: '' };
       } else if (type === 'llmNode') {
-        nodeData = { label, provider: meta.provider || 'openai', model: meta.model || 'gpt-4o-mini', apiKey: '' };
+        nodeData = {
+          label,
+          provider: meta.provider || 'openrouter',
+          model: meta.model || 'google/gemma-4-31b-it:free',
+          credentialRef: undefined,
+          apiKeyMasked: false,
+        };
       }
 
       const newNode: AppNode = {

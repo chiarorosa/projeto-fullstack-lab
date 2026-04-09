@@ -6,12 +6,14 @@ from core.security import (
     SECURITY_SETTINGS,
     validate_security_settings,
 )
+from core.secrets import validate_secret_settings
 from routes.teams import router as teams_router, llm_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_security_settings(SECURITY_SETTINGS)
+    validate_secret_settings(app_env=SECURITY_SETTINGS.app_env)
     await init_db()
     yield
 

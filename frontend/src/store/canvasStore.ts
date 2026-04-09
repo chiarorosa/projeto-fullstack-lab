@@ -36,7 +36,9 @@ export interface LLMData {
   label: string;
   provider: 'openai' | 'anthropic' | 'google' | 'local' | 'openrouter' | 'opencode';
   model: string;
-  apiKey: string;
+  apiKey?: string;
+  credentialRef?: string;
+  apiKeyMasked?: boolean;
   baseUrl?: string;
   connectedAgents?: string[];
   [key: string]: unknown;

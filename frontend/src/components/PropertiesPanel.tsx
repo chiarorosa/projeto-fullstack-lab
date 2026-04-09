@@ -15,6 +15,9 @@ const PROVIDERS = [
 type ProviderValue = (typeof PROVIDERS)[number]['value'];
 
 const LLM_OPTIONS = [
+  { label: 'Gemma 4 31B (Free)', provider: 'openrouter', model: 'google/gemma-4-31b-it:free' },
+  { label: 'GPT-4o Mini (OpenRouter)', provider: 'openrouter', model: 'openai/gpt-4o-mini' },
+  { label: 'Claude 3.5 Sonnet (OpenRouter)', provider: 'openrouter', model: 'anthropic/claude-3.5-sonnet' },
   { label: 'GPT-4o', provider: 'openai', model: 'gpt-4o' },
   { label: 'GPT-4o Mini', provider: 'openai', model: 'gpt-4o-mini' },
   { label: 'Claude 3.5 Sonnet', provider: 'anthropic', model: 'claude-3-5-sonnet' },
@@ -223,6 +226,8 @@ const LLMForm: React.FC<{ id: string; data: LLMData; onChange: any }> = ({ id, d
     message: string;
   }>({ status: 'idle', message: '' });
 
+  const [useEphemeralKeyForTest, setUseEphemeralKeyForTest] = React.useState<boolean>(false);
+
   const clearTestState = () => {
     if (testState.status !== 'idle') {
       setTestState({ status: 'idle', message: '' });
@@ -237,9 +242,11 @@ const LLMForm: React.FC<{ id: string; data: LLMData; onChange: any }> = ({ id, d
   const handleTestProvider = async () => {
     setTestState({ status: 'loading', message: 'Testing provider configuration...' });
     try {
+      const ephemeralKey = useEphemeralKeyForTest ? data.apiKey?.trim() || undefined : undefined;
       const response = await llmApi.testProvider({
         provider: providerValue,
-        api_key: data.apiKey?.trim() || undefined,
+        api_key: ephemeralKey,
+        credential_ref: data.credentialRef?.trim() || undefined,
         model: data.model?.trim() || undefined,
         base_url: data.baseUrl?.trim() || undefined,
       });
@@ -300,14 +307,27 @@ const LLMForm: React.FC<{ id: string; data: LLMData; onChange: any }> = ({ id, d
             className="field-input"
             type="password"
             value={data.apiKey || ''}
-            onChange={(e) => handleDataChange({ apiKey: e.target.value })}
-            placeholder="Leave blank to use environment variable"
+            onChange={(e) => handleDataChange({ apiKey: e.target.value, apiKeyMasked: false })}
+            placeholder={data.credentialRef ? 'Stored securely on backend' : 'Stored securely when team is saved'}
           />
           {providerMeta.envVar && (
             <div className="field-hint">
               Environment variable: {providerMeta.envVar}
             </div>
           )}
+          {data.credentialRef && (
+            <div className="field-hint hint-success">
+              Credential reference saved: {data.credentialRef}
+            </div>
+          )}
+          <label className="field-hint" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={useEphemeralKeyForTest}
+              onChange={(e) => setUseEphemeralKeyForTest(e.target.checked)}
+            />
+            Use typed API key only for this provider test (do not persist)
+          </label>
         </label>
       )}
       

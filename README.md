@@ -54,6 +54,32 @@ O repositório está estruturado em módulos distintos:
    ```
 O backend estará executando em `http://localhost:8000`.
 
+### Baseline de Segurança (ambientes não-dev)
+
+Defina estas variáveis no backend antes de subir em `staging`/`production`:
+
+- `APP_ENV=staging` ou `APP_ENV=production`
+- `API_BEARER_TOKEN=<token-forte>`
+- `CREDENTIAL_ENCRYPTION_KEY=<chave-longa-aleatoria>`
+- `CORS_ALLOW_ORIGINS=https://seu-frontend.com`
+- `AUTH_ENABLED=true`
+- `RATE_LIMIT_ENABLED=true`
+- `RATE_LIMIT_WINDOW_SECONDS=60`
+- `RATE_LIMIT_EXECUTE_REQUESTS=10`
+- `RATE_LIMIT_PROVIDER_TEST_REQUESTS=30`
+
+Provisionamento de chave de credencial (`CREDENTIAL_ENCRYPTION_KEY`):
+
+- Gere uma chave longa aleatória (32+ bytes efetivos).
+- Armazene a chave somente no ambiente de execução (nunca no repositório).
+- Mantenha backup seguro da chave ativa durante a janela de migração/rollback, pois credenciais persistidas dependem dela para descriptografia.
+
+Procedimento de rollback / feature-flag de emergência:
+
+1. Se necessário, desative autenticação temporariamente com `AUTH_ENABLED=false`.
+2. Se necessário, desative throttling temporariamente com `RATE_LIMIT_ENABLED=false`.
+3. Investigue a causa e reative os controles (`true`) assim que possível.
+
 ### Configuração do Frontend (Vite + Node)
 
 1. Abra um novo terminal na raiz do projeto e acesse o diretório frontend:

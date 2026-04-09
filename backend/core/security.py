@@ -50,6 +50,8 @@ def load_security_settings() -> SecuritySettings:
     if app_env not in _VALID_ENVS:
         app_env = "development"
 
+    auth_default = app_env != "development"
+
     cors_allow_origins = [
         value.strip()
         for value in (
@@ -62,7 +64,7 @@ def load_security_settings() -> SecuritySettings:
     return SecuritySettings(
         app_env=app_env,
         cors_allow_origins=cors_allow_origins,
-        auth_enabled=_parse_bool_env("AUTH_ENABLED", True),
+        auth_enabled=_parse_bool_env("AUTH_ENABLED", auth_default),
         api_bearer_token=(os.getenv("API_BEARER_TOKEN") or "").strip(),
         rate_limit_enabled=_parse_bool_env("RATE_LIMIT_ENABLED", True),
         rate_limit_window_seconds=_parse_int_env(

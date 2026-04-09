@@ -10,10 +10,12 @@ import TeamManager from './components/TeamManager';
 import { useCanvasStore } from './store/canvasStore';
 import { teamsApi, executeTeamStream } from './api/client';
 import type { LogEvent } from './components/ExecutionLogs';
-import type { TaskData } from './store/canvasStore';
+import type { AppNode, TaskData } from './store/canvasStore';
+import type { Edge } from '@xyflow/react';
+import axios from 'axios';
 
 function App() {
-  const { nodes, edges, clearCanvas } = useCanvasStore();
+  const { nodes, edges, clearCanvas, loadGraph } = useCanvasStore();
   const [showManager, setShowManager] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<LogEvent[]>([]);
@@ -73,8 +75,25 @@ function App() {
         });
         teamId = res.data.id;
         setCurrentTeamId(teamId);
+        loadGraph(res.data.graph_json.nodes as AppNode[], res.data.graph_json.edges as Edge[]);
       } else {
-        await teamsApi.update(teamId, { graph_json: { nodes, edges } });
+        try {
+          const res = await teamsApi.update(teamId, { graph_json: { nodes, edges } });
+          loadGraph(res.data.graph_json.nodes as AppNode[], res.data.graph_json.edges as Edge[]);
+        } catch (error) {
+          const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+          if (status === 404) {
+            const recreate = await teamsApi.create({
+              name: 'Current Session',
+              graph_json: { nodes, edges },
+            });
+            teamId = recreate.data.id;
+            setCurrentTeamId(teamId);
+            loadGraph(recreate.data.graph_json.nodes as AppNode[], recreate.data.graph_json.edges as Edge[]);
+          } else {
+            throw error;
+          }
+        }
       }
 
       await executeTeamStream(
@@ -156,7 +175,12 @@ function App() {
         <PropertiesPanel />
       </div>
 
-      {showManager && <TeamManager onClose={() => setShowManager(false)} />}
+      {showManager && (
+        <TeamManager
+          onClose={() => setShowManager(false)}
+          onTeamLoaded={(teamId) => setCurrentTeamId(teamId)}
+        />
+      )}
     </div>
   );
 }

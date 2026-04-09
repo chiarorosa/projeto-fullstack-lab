@@ -17,6 +17,12 @@ from models.schemas import (
 from core.database import get_db
 from core.compiler import compile_graph, execute_team_tasks
 from core.provider_validation import test_provider_configuration
+from core.credentials import (
+    hydrate_compiled_agent_secrets,
+    resolve_credential_secret,
+    transform_graph_secrets_for_storage,
+)
+from core.redaction import redact_payload, redact_text
 from core.security import (
     rate_limit_execute,
     rate_limit_provider_test,
@@ -46,19 +52,37 @@ def _serialize_team_run(run: TeamRun) -> TeamRunResponse:
         team_id=run.team_id,
         execution_id=run.execution_id,
         task_index=run.task_index,
-        task_input=run.task_input,
-        final_output=run.final_output,
+        task_input=redact_text(run.task_input),
+        final_output=redact_text(run.final_output)
+        if run.final_output
+        else run.final_output,
         status=run.status,
-        error_message=run.error_message,
+        error_message=redact_text(run.error_message)
+        if run.error_message
+        else run.error_message,
         selected_agent_id=run.selected_agent_id,
         selected_agent=run.selected_agent,
         selected_provider=run.selected_provider,
         selected_model=run.selected_model,
-        routing_reason=run.routing_reason,
-        decision_json=decision_payload,
-        routing_json=routing_payload,
+        routing_reason=redact_text(run.routing_reason) if run.routing_reason else None,
+        decision_json=redact_payload(decision_payload),
+        routing_json=redact_payload(routing_payload),
         created_at=run.created_at.isoformat(),
     )
+
+
+def _sanitize_graph_for_response(graph: dict) -> dict:
+    sanitized = redact_payload(graph)
+    nodes = sanitized.get("nodes") if isinstance(sanitized, dict) else None
+    if isinstance(nodes, list):
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            data = node.get("data")
+            if not isinstance(data, dict):
+                continue
+            data.pop("apiKey", None)
+    return sanitized if isinstance(sanitized, dict) else graph
 
 
 def _friendly_execution_error(error_message: str) -> str:
@@ -98,7 +122,7 @@ async def list_teams(
             id=t.id,
             name=t.name,
             description=t.description,
-            graph_json=json.loads(t.graph_json),
+            graph_json=_sanitize_graph_for_response(json.loads(t.graph_json)),
             created_at=t.created_at.isoformat(),
             updated_at=t.updated_at.isoformat(),
         )
@@ -112,10 +136,15 @@ async def create_team(
     _auth: None = Depends(require_bearer_token),
     db: AsyncSession = Depends(get_db),
 ):
+    transformed_graph, _changed = await transform_graph_secrets_for_storage(
+        db,
+        payload.graph_json,
+    )
+
     team = Team(
         name=payload.name,
         description=payload.description,
-        graph_json=json.dumps(payload.graph_json),
+        graph_json=json.dumps(transformed_graph),
     )
     db.add(team)
     await db.commit()
@@ -124,7 +153,7 @@ async def create_team(
         id=team.id,
         name=team.name,
         description=team.description,
-        graph_json=json.loads(team.graph_json),
+        graph_json=_sanitize_graph_for_response(json.loads(team.graph_json)),
         created_at=team.created_at.isoformat(),
         updated_at=team.updated_at.isoformat(),
     )
@@ -144,7 +173,7 @@ async def get_team(
         id=team.id,
         name=team.name,
         description=team.description,
-        graph_json=json.loads(team.graph_json),
+        graph_json=_sanitize_graph_for_response(json.loads(team.graph_json)),
         created_at=team.created_at.isoformat(),
         updated_at=team.updated_at.isoformat(),
     )
@@ -166,14 +195,18 @@ async def update_team(
     if payload.description is not None:
         team.description = payload.description
     if payload.graph_json is not None:
-        team.graph_json = json.dumps(payload.graph_json)
+        transformed_graph, _changed = await transform_graph_secrets_for_storage(
+            db,
+            payload.graph_json,
+        )
+        team.graph_json = json.dumps(transformed_graph)
     await db.commit()
     await db.refresh(team)
     return TeamResponse(
         id=team.id,
         name=team.name,
         description=team.description,
-        graph_json=json.loads(team.graph_json),
+        graph_json=_sanitize_graph_for_response(json.loads(team.graph_json)),
         created_at=team.created_at.isoformat(),
         updated_at=team.updated_at.isoformat(),
     )
@@ -278,6 +311,7 @@ async def execute_team_route(
 
     graph = json.loads(team.graph_json)
     compiled = compile_graph(graph)
+    await hydrate_compiled_agent_secrets(db, compiled)
 
     if not compiled["agents"]:
         raise HTTPException(
@@ -334,7 +368,7 @@ async def execute_team_route(
             "type": "graph_connectivity",
             "agents": agent_llm_connections,
         }
-        yield f"data: {json.dumps(compiled_summary_event)}\n\n"
+        yield f"data: {json.dumps(redact_payload(compiled_summary_event))}\n\n"
 
         try:
             async for chunk in execute_team_tasks(compiled, task_inputs):
@@ -367,17 +401,21 @@ async def execute_team_route(
                             )
 
                             if event_type == "task_start":
-                                snapshot["task_input"] = str(
-                                    event.get("task_input") or ""
+                                snapshot["task_input"] = redact_text(
+                                    str(event.get("task_input") or "")
                                 )
                                 if event.get("routing") is not None:
-                                    snapshot["routing_json"] = event.get("routing")
+                                    snapshot["routing_json"] = redact_payload(
+                                        event.get("routing")
+                                    )
                             elif event_type == "routing_decision":
                                 snapshot["selected_agent_id"] = event.get(
                                     "selected_agent_id"
                                 )
                                 snapshot["selected_agent"] = event.get("selected_agent")
-                                snapshot["routing_reason"] = event.get("reason")
+                                snapshot["routing_reason"] = redact_text(
+                                    str(event.get("reason") or "")
+                                )
                                 selected_llm = event.get("selected_llm") or {}
                                 if isinstance(selected_llm, dict):
                                     snapshot["selected_provider"] = selected_llm.get(
@@ -386,19 +424,32 @@ async def execute_team_route(
                                     snapshot["selected_model"] = selected_llm.get(
                                         "model"
                                     )
-                                snapshot["decision_json"] = {
-                                    "scores": event.get("scores")
-                                }
+                                snapshot["decision_json"] = redact_payload(
+                                    {"scores": event.get("scores")}
+                                )
                             elif event_type == "task_done":
-                                snapshot["final_output"] = event.get("final_output")
+                                snapshot["final_output"] = redact_text(
+                                    str(event.get("final_output") or "")
+                                )
                                 snapshot["status"] = "completed"
                             elif event_type == "task_error":
                                 snapshot["status"] = "failed"
-                                snapshot["error_message"] = event.get("message")
+                                snapshot["error_message"] = redact_text(
+                                    str(event.get("message") or "")
+                                )
 
-                yield chunk
+                if chunk.startswith("data: "):
+                    payload_text = chunk[len("data: ") :].strip()
+                    try:
+                        event_obj = json.loads(payload_text)
+                        safe_event = redact_payload(event_obj)
+                        yield f"data: {json.dumps(safe_event)}\n\n"
+                    except Exception:
+                        yield chunk
+                else:
+                    yield chunk
         except Exception as exc:
-            friendly = _friendly_execution_error(str(exc))
+            friendly = redact_text(_friendly_execution_error(str(exc)))
             error_event = {
                 "type": "error",
                 "message": friendly,
@@ -414,7 +465,9 @@ async def execute_team_route(
                             execution_id=execution_id,
                             task_index=idx,
                             task_input=snapshot["task_input"]
-                            or (task_inputs[idx] if idx < len(task_inputs) else ""),
+                            or redact_text(
+                                task_inputs[idx] if idx < len(task_inputs) else ""
+                            ),
                             final_output=snapshot["final_output"],
                             status=snapshot["status"],
                             error_message=snapshot["error_message"],
@@ -452,5 +505,14 @@ async def test_llm_provider(
     payload: ProviderTestRequest,
     _auth: None = Depends(require_bearer_token),
     _rate_limit: None = Depends(rate_limit_provider_test),
+    db: AsyncSession = Depends(get_db),
 ):
-    return await test_provider_configuration(payload)
+    resolved_secret = None
+    if payload.credential_ref and not payload.api_key:
+        resolved_secret = await resolve_credential_secret(db, payload.credential_ref)
+
+    response = await test_provider_configuration(
+        payload, resolved_api_key=resolved_secret
+    )
+    response.message = redact_text(response.message)
+    return response

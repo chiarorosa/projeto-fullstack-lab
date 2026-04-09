@@ -253,30 +253,32 @@ async def _check_local(base_url: str) -> ProviderTestResponse:
 
 async def test_provider_configuration(
     payload: ProviderTestRequest,
+    resolved_api_key: Optional[str] = None,
 ) -> ProviderTestResponse:
     provider = _normalize_provider(payload.provider)
+    effective_api_key = (payload.api_key or resolved_api_key or "").strip()
 
     try:
         if provider == "openai":
-            if not payload.api_key:
+            if not effective_api_key:
                 return ProviderTestResponse(
                     ok=False, message="OpenAI API key is required."
                 )
             return await _check_openai_like(
                 provider_label="OpenAI",
-                api_key=payload.api_key,
+                api_key=effective_api_key,
                 base_url=_normalize_base_url(
                     payload.base_url, "https://api.openai.com/v1"
                 ),
             )
 
         if provider == "openrouter":
-            if not payload.api_key:
+            if not effective_api_key:
                 return ProviderTestResponse(
                     ok=False, message="OpenRouter API key is required."
                 )
             return await _check_openrouter(
-                api_key=payload.api_key,
+                api_key=effective_api_key,
                 base_url=_normalize_base_url(
                     payload.base_url, "https://openrouter.ai/api/v1"
                 ),
@@ -284,24 +286,24 @@ async def test_provider_configuration(
             )
 
         if provider == "anthropic":
-            if not payload.api_key:
+            if not effective_api_key:
                 return ProviderTestResponse(
                     ok=False, message="Anthropic API key is required."
                 )
             return await _check_anthropic(
-                api_key=payload.api_key,
+                api_key=effective_api_key,
                 base_url=_normalize_base_url(
                     payload.base_url, "https://api.anthropic.com"
                 ),
             )
 
         if provider == "google":
-            if not payload.api_key:
+            if not effective_api_key:
                 return ProviderTestResponse(
                     ok=False, message="Google API key is required."
                 )
             return await _check_google(
-                api_key=payload.api_key,
+                api_key=effective_api_key,
                 base_url=_normalize_base_url(
                     payload.base_url,
                     "https://generativelanguage.googleapis.com",

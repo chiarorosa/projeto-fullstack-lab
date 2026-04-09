@@ -60,6 +60,7 @@ ProviderType = Literal[
 class ProviderTestRequest(BaseModel):
     provider: ProviderType
     api_key: Optional[str] = None
+    credential_ref: Optional[str] = None
     model: Optional[str] = None
     base_url: Optional[str] = None
 

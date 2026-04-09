@@ -25,7 +25,13 @@ const NODE_PALETTE = [
   {
     category: 'LLM',
     items: [
-      { type: 'llmNode', label: 'LLM Node', icon: <Cpu size={18} />, color: '#10a37f', meta: { provider: 'openai', model: 'gpt-4o-mini' } },
+      {
+        type: 'llmNode',
+        label: 'LLM Node',
+        icon: <Cpu size={18} />,
+        color: '#10a37f',
+        meta: { provider: 'openrouter', model: 'google/gemma-4-31b-it:free' },
+      },
     ],
   },
 ];
@@ -54,9 +60,10 @@ const SidebarPalette: React.FC = () => {
     } else if (item.type === 'llmNode') {
       nodeData = {
         label: item.label,
-        provider: meta.provider || 'openai',
-        model: meta.model || 'gpt-4o-mini',
-        apiKey: '',
+        provider: meta.provider || 'openrouter',
+        model: meta.model || 'google/gemma-4-31b-it:free',
+        credentialRef: undefined,
+        apiKeyMasked: false,
       };
     }
 

@@ -16,6 +16,16 @@ class Team(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class Credential(Base):
+    __tablename__ = "credentials"
+
+    id = Column(String(64), primary_key=True, index=True)
+    provider = Column(String(64), nullable=False)
+    secret_encrypted = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class TeamRun(Base):
     __tablename__ = "team_runs"
 

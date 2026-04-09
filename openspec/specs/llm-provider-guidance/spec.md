@@ -63,3 +63,18 @@ The backend SHALL validate provider settings based on provider type and return a
 - **WHEN** provider is `local`
 - **THEN** backend performs a lightweight reachability check on supplied or default local base URL
 - **AND** backend returns a normalized JSON response with `ok` boolean and `message`
+
+#### Scenario: Backend validates provider using credential reference
+- **WHEN** validation request includes `credentialRef` for a selected provider
+- **THEN** backend resolves secret from secure credential storage
+- **AND** backend performs provider validation without requiring raw secret in persisted graph payload
+
+#### Scenario: Ephemeral validation key is not persisted
+- **WHEN** validation request includes one-time `apiKey` input for immediate validation
+- **THEN** backend validates connectivity for that request
+- **AND** backend does not persist the ephemeral key into team graph data
+
+#### Scenario: Validation response redacts secret data
+- **WHEN** validation result is returned to client
+- **THEN** response contains normalized status and guidance only
+- **AND** response does not expose raw secret values or decrypted credential contents

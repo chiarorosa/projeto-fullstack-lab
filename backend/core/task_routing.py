@@ -86,6 +86,24 @@ async def route_task_to_agent(
             "fallback_used": True,
         }
 
+    if len(eligible_agents) == 1:
+        only = eligible_agents[0]
+        return {
+            "selected_agent": only.get("role"),
+            "selected_agent_id": only.get("id"),
+            "selected_agent_llm": only.get("llm"),
+            "reason": "Single eligible agent available",
+            "scores": [
+                {
+                    "agent_id": only.get("id"),
+                    "agent": only.get("role"),
+                    "score": 100,
+                    "reason": "Only eligible candidate",
+                }
+            ],
+            "fallback_used": False,
+        }
+
     router_llm = eligible_agents[0].get("llm")
     if not router_llm:
         fallback = _fallback_route(task_text, eligible_agents)
