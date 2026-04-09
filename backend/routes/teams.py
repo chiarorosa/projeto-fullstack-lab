@@ -17,6 +17,11 @@ from models.schemas import (
 from core.database import get_db
 from core.compiler import compile_graph, execute_team_tasks
 from core.provider_validation import test_provider_configuration
+from core.security import (
+    rate_limit_execute,
+    rate_limit_provider_test,
+    require_bearer_token,
+)
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 llm_router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -82,7 +87,10 @@ def _friendly_execution_error(error_message: str) -> str:
 
 
 @router.get("/", response_model=list[TeamResponse])
-async def list_teams(db: AsyncSession = Depends(get_db)):
+async def list_teams(
+    _auth: None = Depends(require_bearer_token),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(Team).order_by(Team.updated_at.desc()))
     teams = result.scalars().all()
     return [
@@ -99,7 +107,11 @@ async def list_teams(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/", response_model=TeamResponse, status_code=201)
-async def create_team(payload: TeamCreate, db: AsyncSession = Depends(get_db)):
+async def create_team(
+    payload: TeamCreate,
+    _auth: None = Depends(require_bearer_token),
+    db: AsyncSession = Depends(get_db),
+):
     team = Team(
         name=payload.name,
         description=payload.description,
@@ -119,7 +131,11 @@ async def create_team(payload: TeamCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{team_id}", response_model=TeamResponse)
-async def get_team(team_id: int, db: AsyncSession = Depends(get_db)):
+async def get_team(
+    team_id: int,
+    _auth: None = Depends(require_bearer_token),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(Team).where(Team.id == team_id))
     team = result.scalar_one_or_none()
     if not team:
@@ -136,7 +152,10 @@ async def get_team(team_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.put("/{team_id}", response_model=TeamResponse)
 async def update_team(
-    team_id: int, payload: TeamUpdate, db: AsyncSession = Depends(get_db)
+    team_id: int,
+    payload: TeamUpdate,
+    _auth: None = Depends(require_bearer_token),
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Team).where(Team.id == team_id))
     team = result.scalar_one_or_none()
@@ -161,7 +180,11 @@ async def update_team(
 
 
 @router.delete("/{team_id}", status_code=204)
-async def delete_team(team_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_team(
+    team_id: int,
+    _auth: None = Depends(require_bearer_token),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(Team).where(Team.id == team_id))
     team = result.scalar_one_or_none()
     if not team:
@@ -172,7 +195,10 @@ async def delete_team(team_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/{team_id}/runs", response_model=list[TeamRunResponse])
 async def list_team_runs(
-    team_id: int, limit: int = 50, db: AsyncSession = Depends(get_db)
+    team_id: int,
+    limit: int = 50,
+    _auth: None = Depends(require_bearer_token),
+    db: AsyncSession = Depends(get_db),
 ):
     team_result = await db.execute(select(Team).where(Team.id == team_id))
     team = team_result.scalar_one_or_none()
@@ -192,7 +218,10 @@ async def list_team_runs(
 
 @router.get("/{team_id}/runs/by-execution")
 async def list_runs_grouped_by_execution(
-    team_id: int, limit: int = 20, db: AsyncSession = Depends(get_db)
+    team_id: int,
+    limit: int = 20,
+    _auth: None = Depends(require_bearer_token),
+    db: AsyncSession = Depends(get_db),
 ):
     team_result = await db.execute(select(Team).where(Team.id == team_id))
     team = team_result.scalar_one_or_none()
@@ -236,7 +265,11 @@ async def list_runs_grouped_by_execution(
 
 @router.post("/{team_id}/execute")
 async def execute_team_route(
-    team_id: int, payload: ExecuteRequest, db: AsyncSession = Depends(get_db)
+    team_id: int,
+    payload: ExecuteRequest,
+    _auth: None = Depends(require_bearer_token),
+    _rate_limit: None = Depends(rate_limit_execute),
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Team).where(Team.id == team_id))
     team = result.scalar_one_or_none()
@@ -415,5 +448,9 @@ async def execute_team_route(
 
 
 @llm_router.post("/test-provider", response_model=ProviderTestResponse)
-async def test_llm_provider(payload: ProviderTestRequest):
+async def test_llm_provider(
+    payload: ProviderTestRequest,
+    _auth: None = Depends(require_bearer_token),
+    _rate_limit: None = Depends(rate_limit_provider_test),
+):
     return await test_provider_configuration(payload)

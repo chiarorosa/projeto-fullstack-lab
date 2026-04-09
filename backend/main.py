@@ -2,11 +2,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from core.database import init_db
+from core.security import (
+    SECURITY_SETTINGS,
+    validate_security_settings,
+)
 from routes.teams import router as teams_router, llm_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_security_settings(SECURITY_SETTINGS)
     await init_db()
     yield
 
@@ -20,7 +25,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=SECURITY_SETTINGS.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
