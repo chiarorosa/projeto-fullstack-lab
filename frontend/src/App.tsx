@@ -172,7 +172,7 @@ function App() {
           )}
         </main>
 
-        <PropertiesPanel />
+        <PropertiesPanel teamId={currentTeamId} />
       </div>
 
       {showManager && (

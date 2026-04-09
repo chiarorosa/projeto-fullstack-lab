@@ -63,11 +63,14 @@ class ProviderTestRequest(BaseModel):
     credential_ref: Optional[str] = None
     model: Optional[str] = None
     base_url: Optional[str] = None
+    team_id: Optional[int] = None
+    node_id: Optional[str] = None
 
 
 class ProviderTestResponse(BaseModel):
     ok: bool
     message: str
+    credential_ref: Optional[str] = None
 
 
 class TeamRunResponse(BaseModel):

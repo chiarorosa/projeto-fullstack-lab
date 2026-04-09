@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from threading import Lock
 
 from fastapi import Header, HTTPException, Request, status
+from core.env import load_environment
+
+
+load_environment()
 
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}

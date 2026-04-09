@@ -6,6 +6,11 @@ import hmac
 import os
 from dataclasses import dataclass
 
+from core.env import load_environment
+
+
+load_environment()
+
 
 @dataclass(frozen=True)
 class SecretSettings:

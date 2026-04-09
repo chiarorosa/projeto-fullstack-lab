@@ -74,7 +74,7 @@ const PROVIDER_METADATA: Record<ProviderValue, ProviderMetadata> = {
   },
 };
 
-const PropertiesPanel: React.FC = () => {
+const PropertiesPanel: React.FC<{ teamId?: number | null }> = ({ teamId }) => {
   const { nodes, edges, selectedNodeId, updateNodeData, selectNode } = useCanvasStore();
 
   if (!selectedNodeId) return null;
@@ -121,7 +121,7 @@ const PropertiesPanel: React.FC = () => {
           <TaskForm id={node.id} data={node.data as TaskData} onChange={updateNodeData} />
         )}
         {node.type === 'llmNode' && (
-          <LLMForm id={node.id} data={node.data as LLMData} onChange={updateNodeData} />
+          <LLMForm id={node.id} data={node.data as LLMData} onChange={updateNodeData} teamId={teamId} />
         )}
       </div>
     </aside>
@@ -215,7 +215,7 @@ const TaskForm: React.FC<{ id: string; data: TaskData; onChange: any }> = ({ id,
   );
 };
 
-const LLMForm: React.FC<{ id: string; data: LLMData; onChange: any }> = ({ id, data, onChange }) => {
+const LLMForm: React.FC<{ id: string; data: LLMData; onChange: any; teamId?: number | null }> = ({ id, data, onChange, teamId }) => {
   const providerValue: ProviderValue = data.provider === 'opencode' ? 'openrouter' : (data.provider || 'openai');
   const isLocalProvider = providerValue === 'local';
   const providerMeta = PROVIDER_METADATA[providerValue];
@@ -225,8 +225,6 @@ const LLMForm: React.FC<{ id: string; data: LLMData; onChange: any }> = ({ id, d
     status: 'idle' | 'loading' | 'success' | 'error';
     message: string;
   }>({ status: 'idle', message: '' });
-
-  const [useEphemeralKeyForTest, setUseEphemeralKeyForTest] = React.useState<boolean>(false);
 
   const clearTestState = () => {
     if (testState.status !== 'idle') {
@@ -242,14 +240,20 @@ const LLMForm: React.FC<{ id: string; data: LLMData; onChange: any }> = ({ id, d
   const handleTestProvider = async () => {
     setTestState({ status: 'loading', message: 'Testing provider configuration...' });
     try {
-      const ephemeralKey = useEphemeralKeyForTest ? data.apiKey?.trim() || undefined : undefined;
       const response = await llmApi.testProvider({
         provider: providerValue,
-        api_key: ephemeralKey,
+        api_key: data.apiKey?.trim() || undefined,
         credential_ref: data.credentialRef?.trim() || undefined,
         model: data.model?.trim() || undefined,
         base_url: data.baseUrl?.trim() || undefined,
+        team_id: teamId ?? undefined,
+        node_id: id,
       });
+
+      const returnedCredentialRef = response.data.credential_ref?.trim();
+      if (response.data.ok && returnedCredentialRef) {
+        onChange(id, { credentialRef: returnedCredentialRef, apiKey: '' });
+      }
 
       setTestState({
         status: response.data.ok ? 'success' : 'error',
@@ -320,14 +324,6 @@ const LLMForm: React.FC<{ id: string; data: LLMData; onChange: any }> = ({ id, d
               Credential reference saved: {data.credentialRef}
             </div>
           )}
-          <label className="field-hint" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={useEphemeralKeyForTest}
-              onChange={(e) => setUseEphemeralKeyForTest(e.target.checked)}
-            />
-            Use typed API key only for this provider test (do not persist)
-          </label>
         </label>
       )}
       

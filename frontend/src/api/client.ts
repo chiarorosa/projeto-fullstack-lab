@@ -75,11 +75,14 @@ export interface ProviderTestRequest {
   credential_ref?: string;
   model?: string;
   base_url?: string;
+  team_id?: number;
+  node_id?: string;
 }
 
 export interface ProviderTestResponse {
   ok: boolean;
   message: string;
+  credential_ref?: string;
 }
 
 export interface ExecutePayload {

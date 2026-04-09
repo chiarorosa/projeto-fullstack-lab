@@ -52,6 +52,87 @@ async def resolve_credential_secret(
     return decrypt_secret(credential.secret_encrypted)
 
 
+async def upsert_node_credential(
+    db: AsyncSession,
+    *,
+    provider: str,
+    existing_credential_ref: str | None,
+    secret: str,
+) -> str:
+    normalized_provider = _normalize_provider(provider)
+    current_ref = str(existing_credential_ref or "").strip()
+
+    if current_ref:
+        result = await db.execute(
+            select(Credential).where(Credential.id == current_ref)
+        )
+        credential = result.scalar_one_or_none()
+        if credential:
+            credential.provider = normalized_provider
+            credential.secret_encrypted = encrypt_secret(secret)
+            await db.flush()
+            return current_ref
+
+    return await create_credential(
+        db,
+        provider=normalized_provider,
+        secret=secret,
+    )
+
+
+def _find_node_data_by_id(
+    graph_json: dict[str, Any],
+    *,
+    node_id: str,
+) -> dict[str, Any] | None:
+    nodes = graph_json.get("nodes")
+    if not isinstance(nodes, list):
+        return None
+
+    for node in nodes:
+        if not isinstance(node, dict) or str(node.get("id")) != node_id:
+            continue
+        data = node.get("data")
+        if isinstance(data, dict):
+            return data
+
+    return None
+
+
+async def upsert_node_credential_ref_in_team_graph(
+    db: AsyncSession,
+    *,
+    team_id: int,
+    node_id: str,
+    provider: str,
+    secret: str,
+) -> str:
+    result = await db.execute(select(Team).where(Team.id == team_id))
+    team = result.scalar_one_or_none()
+    if not team:
+        raise LookupError("team_not_found")
+
+    graph = json.loads(team.graph_json)
+    node_data = _find_node_data_by_id(graph, node_id=node_id)
+    if node_data is None:
+        raise ValueError("node_not_found")
+
+    credential_ref = await upsert_node_credential(
+        db,
+        provider=provider,
+        existing_credential_ref=str(node_data.get("credentialRef") or "").strip()
+        or None,
+        secret=secret,
+    )
+
+    node_data["credentialRef"] = credential_ref
+    node_data.pop("apiKey", None)
+
+    team.graph_json = json.dumps(graph)
+    await db.flush()
+    return credential_ref
+
+
 def _extract_llm_node_data(graph_json: dict[str, Any]) -> list[dict[str, Any]]:
     nodes = graph_json.get("nodes")
     if not isinstance(nodes, list):

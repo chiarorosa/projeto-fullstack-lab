@@ -19,8 +19,13 @@ from core.compiler import compile_graph, execute_team_tasks
 from core.provider_validation import test_provider_configuration
 from core.credentials import (
     hydrate_compiled_agent_secrets,
+    upsert_node_credential_ref_in_team_graph,
     resolve_credential_secret,
     transform_graph_secrets_for_storage,
+)
+from core.provider_validation import (
+    provider_requires_api_key,
+    resolve_effective_api_key,
 )
 from core.redaction import redact_payload, redact_text
 from core.security import (
@@ -508,11 +513,50 @@ async def test_llm_provider(
     db: AsyncSession = Depends(get_db),
 ):
     resolved_secret = None
-    if payload.credential_ref and not payload.api_key:
+    explicit_api_key = (payload.api_key or "").strip()
+    if payload.credential_ref and not explicit_api_key:
         resolved_secret = await resolve_credential_secret(db, payload.credential_ref)
+
+    effective_api_key, _source = resolve_effective_api_key(
+        provider=payload.provider,
+        api_key=payload.api_key,
+        credential_api_key=resolved_secret,
+    )
 
     response = await test_provider_configuration(
         payload, resolved_api_key=resolved_secret
     )
+
+    node_id_value = str(payload.node_id or "").strip()
+    has_persistence_context = payload.team_id is not None and bool(node_id_value)
+    if (
+        response.ok
+        and provider_requires_api_key(payload.provider)
+        and has_persistence_context
+        and effective_api_key
+    ):
+        try:
+            credential_ref = await upsert_node_credential_ref_in_team_graph(
+                db,
+                team_id=payload.team_id,
+                node_id=node_id_value,
+                provider=payload.provider,
+                secret=effective_api_key,
+            )
+            await db.commit()
+            response.credential_ref = credential_ref
+        except LookupError:
+            await db.rollback()
+            raise HTTPException(
+                status_code=404,
+                detail="Team not found for provider-test credential persistence.",
+            )
+        except ValueError:
+            await db.rollback()
+            raise HTTPException(
+                status_code=404,
+                detail="Node not found in team graph for provider-test credential persistence.",
+            )
+
     response.message = redact_text(response.message)
     return response
