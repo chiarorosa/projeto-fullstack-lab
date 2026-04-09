@@ -27,6 +27,27 @@ def _friendly_provider_error(raw_message: str, provider: str, model: str) -> str
     text = raw_message.strip()
     lower = text.lower()
 
+    if provider == "openrouter" and ("429" in lower or "rate/usage limit" in lower):
+        detail = text
+        marker = "upstream detail:"
+        marker_idx = lower.find(marker)
+        if marker_idx != -1:
+            detail = text[marker_idx + len(marker) :].strip() or text
+        return (
+            "OpenRouter key is valid, but model execution failed (429): "
+            f"{detail} "
+            "Add credits or switch to another model and retry."
+        )
+
+    if (
+        provider == "openrouter"
+        and "model access failed even though api key is valid" in lower
+    ):
+        return (
+            "OpenRouter key is valid, but this model is not currently accessible for your account. "
+            "Check model permissions/availability or choose another model."
+        )
+
     if "401" in lower:
         return (
             f"{provider}/{model} authentication failed (401). "
@@ -102,10 +123,12 @@ def compile_graph(graph_json: dict) -> dict:
     edges = graph_json.get("edges", [])
 
     task_nodes = {n["id"]: n for n in nodes if n.get("type") == "taskNode"}
+    webhook_nodes = {n["id"]: n for n in nodes if n.get("type") == "webhookNode"}
     agent_nodes = {n["id"]: n for n in nodes if n.get("type") == "agentNode"}
     llm_nodes = {n["id"]: n for n in nodes if n.get("type") == "llmNode"}
 
     task_connected_agent_ids: list[str] = []
+    webhook_connected_agent_ids: list[str] = []
 
     # Build adjacency for agent->agent edges
     agent_edges = [
@@ -137,6 +160,8 @@ def compile_graph(graph_json: dict) -> dict:
             agent_nodes[tgt]["data"]["connectedLlm"] = src
         if src in task_nodes and tgt in agent_nodes:
             task_connected_agent_ids.append(tgt)
+        if src in webhook_nodes and tgt in agent_nodes:
+            webhook_connected_agent_ids.append(tgt)
 
     compiled_agents = [
         _build_agent_config(agent_nodes[aid], llm_nodes) for aid in ordered_agents
@@ -146,7 +171,9 @@ def compile_graph(graph_json: dict) -> dict:
         "agents": compiled_agents,
         "execution_order": ordered_agents,
         "task_connected_agent_ids": task_connected_agent_ids,
+        "webhook_connected_agent_ids": webhook_connected_agent_ids,
         "has_task_node": bool(task_nodes),
+        "has_webhook_node": bool(webhook_nodes),
     }
 
 
@@ -185,19 +212,30 @@ async def execute_team(compiled: dict, task_input: str) -> AsyncIterator[str]:
 
 
 async def execute_team_tasks(
-    compiled: dict, task_inputs: list[str]
+    compiled: dict,
+    task_inputs: list[str],
+    execution_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[str]:
     """
     Execute one or many tasks. Emits routing metadata per task and
     only activates agents with valid LLM connection.
     """
     all_agents = compiled.get("agents", [])
-    task_connected_ids = set(compiled.get("task_connected_agent_ids", []))
-    if compiled.get("has_task_node") and not task_connected_ids:
+    context = execution_context or {"source": "task"}
+    source = str(context.get("source") or "task").lower()
+
+    if source == "webhook":
+        entry_connected_ids = set(compiled.get("webhook_connected_agent_ids", []))
+        has_entry_node = bool(compiled.get("has_webhook_node"))
+    else:
+        entry_connected_ids = set(compiled.get("task_connected_agent_ids", []))
+        has_entry_node = bool(compiled.get("has_task_node"))
+
+    if has_entry_node and not entry_connected_ids:
         all_agents = []
-    elif task_connected_ids:
+    elif entry_connected_ids:
         all_agents = [
-            agent for agent in all_agents if agent.get("id") in task_connected_ids
+            agent for agent in all_agents if agent.get("id") in entry_connected_ids
         ]
 
     eligible_agents = [agent for agent in all_agents if agent.get("eligible")]
@@ -222,6 +260,13 @@ async def execute_team_tasks(
                     for agent in eligible_agents
                 ],
                 "skipped_agents": skipped_agents,
+            },
+            "bootstrap": {
+                "source": source,
+                "trigger_id": context.get("trigger_id"),
+                "timestamp": context.get("timestamp"),
+                "correlation_id": context.get("correlation_id"),
+                "test_origin": context.get("test_origin"),
             },
         }
         yield f"data: {json.dumps(routing_event)}\n\n"
@@ -261,6 +306,8 @@ async def execute_team_tasks(
             "scores": routing_decision.get("scores") or [],
             "fallback_used": bool(routing_decision.get("fallback_used", False)),
             "ineligible_agents": skipped_agents,
+            "bootstrap_source": source,
+            "correlation_id": context.get("correlation_id"),
         }
         yield f"data: {json.dumps(decision_event)}\n\n"
 

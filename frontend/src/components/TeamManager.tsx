@@ -220,6 +220,13 @@ const TeamManager: React.FC<TeamManagerProps> = ({ onClose, onTeamLoaded }) => {
                     <span title={run.execution_id}>Exec: {run.execution_id.slice(0, 8)}...</span>
                     <span>{new Date(run.created_at).toLocaleString()}</span>
                   </div>
+                  {(run.source || run.trigger_id || run.correlation_id) && (
+                    <div className="run-card-label">
+                      Source: {run.source || 'task'}
+                      {run.trigger_id ? ` · Trigger: ${run.trigger_id}` : ''}
+                      {run.correlation_id ? ` · Correlation: ${run.correlation_id}` : ''}
+                    </div>
+                  )}
                   {(run.selected_agent || run.selected_provider || run.selected_model) && (
                     <div className="run-card-label">
                       Selected: {run.selected_agent || 'N/A'} · {run.selected_provider || 'provider?'} / {run.selected_model || 'model?'}

@@ -8,6 +8,7 @@ from core.security import (
 )
 from core.secrets import validate_secret_settings
 from routes.teams import router as teams_router, llm_router
+from routes.webhooks import router as webhooks_router
 
 
 @asynccontextmanager
@@ -35,6 +36,7 @@ app.add_middleware(
 
 app.include_router(teams_router)
 app.include_router(llm_router)
+app.include_router(webhooks_router)
 
 
 @app.get("/health")

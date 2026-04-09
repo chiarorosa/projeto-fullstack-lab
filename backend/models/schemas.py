@@ -89,6 +89,10 @@ class TeamRunResponse(BaseModel):
     routing_reason: Optional[str]
     decision_json: Optional[dict]
     routing_json: Optional[dict]
+    source: Optional[str] = "task"
+    trigger_id: Optional[str] = None
+    trigger_timestamp: Optional[str] = None
+    correlation_id: Optional[str] = None
     created_at: str
 
     class Config:

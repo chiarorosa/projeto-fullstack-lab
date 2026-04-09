@@ -11,12 +11,14 @@ import '@xyflow/react/dist/style.css';
 
 import { useCanvasStore } from '../store/canvasStore';
 import TaskNode from './nodes/TaskNode';
+import WebhookNode from './nodes/WebhookNode';
 import AgentNode from './nodes/AgentNode';
 import LLMNode from './nodes/LLMNode';
 import type { AppNode } from '../store/canvasStore';
 
 const nodeTypes = {
   taskNode: TaskNode,
+  webhookNode: WebhookNode,
   agentNode: AgentNode,
   llmNode: LLMNode,
 };
@@ -49,6 +51,8 @@ const Canvas: React.FC = () => {
       let nodeData: any = {};
       if (type === 'taskNode') {
         nodeData = { label, taskInput: meta.taskInput || '', taskInputs: meta.taskInputs || [] };
+      } else if (type === 'webhookNode') {
+        nodeData = { label, webhookId: meta.webhookId || '', method: 'POST' };
       } else if (type === 'agentNode') {
         nodeData = { label, role: label, goal: '', backstory: '' };
       } else if (type === 'llmNode') {
@@ -158,6 +162,7 @@ const Canvas: React.FC = () => {
         <MiniMap
           nodeColor={(n) => {
             if (n.type === 'taskNode') return '#14b8a6';
+            if (n.type === 'webhookNode') return '#f97316';
             if (n.type === 'agentNode') return '#7c3aed';
             if (n.type === 'llmNode') return '#10a37f';
             return '#06b6d4';

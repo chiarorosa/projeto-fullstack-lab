@@ -1,7 +1,7 @@
 import React from 'react';
-import { X, Bot, Cpu, Loader2, ListTodo } from 'lucide-react';
+import { X, Bot, Cpu, Loader2, ListTodo, Webhook, RefreshCw, Copy, Terminal } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
-import type { AgentData, LLMData, TaskData } from '../store/canvasStore';
+import type { AgentData, LLMData, TaskData, WebhookData } from '../store/canvasStore';
 import { llmApi } from '../api/client';
 
 const PROVIDERS = [
@@ -35,6 +35,15 @@ type ProviderMetadata = {
   docsUrl: string;
   baseUrlHint?: string;
 };
+
+const API_BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://localhost:8000').replace(/\/$/, '');
+
+function generateWebhookId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `wh_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+  }
+  return `wh_${Math.random().toString(36).slice(2, 14)}`;
+}
 
 const PROVIDER_METADATA: Record<ProviderValue, ProviderMetadata> = {
   openai: {
@@ -75,7 +84,7 @@ const PROVIDER_METADATA: Record<ProviderValue, ProviderMetadata> = {
 };
 
 const PropertiesPanel: React.FC<{ teamId?: number | null }> = ({ teamId }) => {
-  const { nodes, edges, selectedNodeId, updateNodeData, selectNode } = useCanvasStore();
+  const { nodes, edges, selectedNodeId, updateNodeData, selectNode, openWebhookTester } = useCanvasStore();
 
   if (!selectedNodeId) return null;
 
@@ -96,10 +105,12 @@ const PropertiesPanel: React.FC<{ teamId?: number | null }> = ({ teamId }) => {
         <div className="panel-title-row">
           {node.type === 'agentNode' && <Bot size={16} className="panel-icon agent-icon" />}
           {node.type === 'taskNode' && <ListTodo size={16} className="panel-icon task-icon" />}
+          {node.type === 'webhookNode' && <Webhook size={16} className="panel-icon webhook-icon" />}
           {node.type === 'llmNode' && <Cpu size={16} className="panel-icon llm-icon" />}
           <span className="panel-title">
             {node.type === 'agentNode' && 'Agent Properties'}
             {node.type === 'taskNode' && 'Task Properties'}
+            {node.type === 'webhookNode' && 'Webhook Properties'}
             {node.type === 'llmNode' && 'LLM Properties'}
           </span>
         </div>
@@ -119,6 +130,9 @@ const PropertiesPanel: React.FC<{ teamId?: number | null }> = ({ teamId }) => {
         )}
         {node.type === 'taskNode' && (
           <TaskForm id={node.id} data={node.data as TaskData} onChange={updateNodeData} />
+        )}
+        {node.type === 'webhookNode' && (
+          <WebhookForm id={node.id} data={node.data as WebhookData} onChange={updateNodeData} onOpenTester={openWebhookTester} />
         )}
         {node.type === 'llmNode' && (
           <LLMForm id={node.id} data={node.data as LLMData} onChange={updateNodeData} teamId={teamId} />
@@ -210,6 +224,100 @@ const TaskForm: React.FC<{ id: string; data: TaskData; onChange: any }> = ({ id,
 
       <div className="field-hint">
         O Task Node funciona como bootstrap da execução. Se houver tarefas em lote, elas terão prioridade sobre o campo de tarefa única.
+      </div>
+    </div>
+  );
+};
+
+const WebhookForm: React.FC<{
+  id: string;
+  data: WebhookData;
+  onChange: any;
+  onOpenTester: (payload: { nodeId: string; endpoint: string; webhookId: string; body?: string }) => void;
+}> = ({ id, data, onChange, onOpenTester }) => {
+  const webhookId = (data.webhookId || '').trim();
+  const endpoint = webhookId ? `${API_BASE_URL}/api/webhooks/${webhookId}` : '';
+  const [copied, setCopied] = React.useState(false);
+
+  const regenerate = () => {
+    onChange(id, { webhookId: generateWebhookId(), method: 'POST' });
+    setCopied(false);
+  };
+
+  const copyEndpoint = async () => {
+    if (!endpoint) return;
+    try {
+      await navigator.clipboard.writeText(endpoint);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  const openTester = () => {
+    if (!webhookId || !endpoint) return;
+    onOpenTester({
+      nodeId: id,
+      endpoint,
+      webhookId,
+      body: data.testPresets?.[0]?.body || '{\n  "task": ""\n}',
+    });
+  };
+
+  return (
+    <div className="form-fields">
+      <label className="field-label">Webhook Label
+        <input
+          className="field-input"
+          value={data.label || ''}
+          onChange={(e) => onChange(id, { label: e.target.value })}
+          placeholder="e.g., Incoming CRM Events"
+        />
+      </label>
+
+      <label className="field-label">Method
+        <input className="field-input" value="POST" disabled />
+      </label>
+
+      <label className="field-label">Trigger ID
+        <div className="inline-action-row">
+          <input
+            className="field-input"
+            value={data.webhookId || ''}
+            onChange={(e) => onChange(id, { webhookId: e.target.value, method: 'POST' })}
+            placeholder="wh_..."
+          />
+          <button className="btn-ghost inline-icon-btn" type="button" onClick={regenerate} title="Regenerate trigger id">
+            <RefreshCw size={14} />
+          </button>
+        </div>
+      </label>
+
+      <label className="field-label">Trigger Endpoint
+        <div className="inline-action-row">
+          <input className="field-input" value={endpoint} placeholder="Generate a trigger id to enable endpoint" readOnly />
+          <button className="btn-ghost inline-icon-btn" type="button" onClick={copyEndpoint} disabled={!endpoint} title="Copy endpoint">
+            <Copy size={14} />
+          </button>
+          <button
+            className="btn-ghost inline-icon-btn"
+            type="button"
+            onClick={openTester}
+            disabled={!endpoint}
+            title="Open webhook test console"
+          >
+            <Terminal size={14} />
+          </button>
+        </div>
+      </label>
+
+      <div className={`field-hint ${webhookId ? 'hint-success' : 'hint-warning'}`}>
+        {webhookId
+          ? copied
+            ? 'Endpoint copied.'
+            : 'Ready. Send JSON payload with task/task_input or task_inputs to trigger execution.'
+          : 'Set a trigger id to activate this webhook.'}
       </div>
     </div>
   );
