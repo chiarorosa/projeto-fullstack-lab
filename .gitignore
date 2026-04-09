@@ -6,3 +6,6 @@ dist/
 build/
 .ruff_cache/
 .DS_Store
+
+.agent/
+.agents/
