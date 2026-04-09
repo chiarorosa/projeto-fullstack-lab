@@ -1,9 +1,5 @@
-# secret-protection Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change security-hardening-baseline. Update Purpose after archive.
-
-## Requirements
 ### Requirement: Provider Credentials Shall Not Be Persisted in Graph Payloads
 The system SHALL prevent raw provider API keys from being stored in persisted team graph JSON.
 

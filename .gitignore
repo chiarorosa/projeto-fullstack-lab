@@ -1,6 +1,12 @@
 __pycache__/
 *.pyc
 .env
+backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.staging.example
+!backend/.env.production.example
+!backend/.env.test.example
 node_modules/
 dist/
 build/

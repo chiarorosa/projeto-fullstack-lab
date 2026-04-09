@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 import httpx
@@ -7,10 +8,78 @@ import httpx
 from models.schemas import ProviderTestRequest, ProviderTestResponse
 
 
+_PROVIDER_ENV_KEYS = {
+    "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google": "GOOGLE_API_KEY",
+}
+_PROVIDER_LABELS = {
+    "openai": "OpenAI",
+    "openrouter": "OpenRouter",
+    "anthropic": "Anthropic",
+    "google": "Google",
+}
+_KEYED_PROVIDERS = set(_PROVIDER_ENV_KEYS.keys())
+
+
 def _normalize_provider(provider: str) -> str:
     if provider == "opencode":
         return "openrouter"
     return provider
+
+
+def provider_requires_api_key(provider: str) -> bool:
+    return _normalize_provider(provider) in _KEYED_PROVIDERS
+
+
+def provider_env_var_name(provider: str) -> Optional[str]:
+    return _PROVIDER_ENV_KEYS.get(_normalize_provider(provider))
+
+
+def resolve_provider_env_api_key(provider: str) -> Optional[str]:
+    env_var = provider_env_var_name(provider)
+    if not env_var:
+        return None
+    value = (os.getenv(env_var) or "").strip()
+    return value or None
+
+
+def resolve_effective_api_key(
+    *,
+    provider: str,
+    api_key: Optional[str],
+    credential_api_key: Optional[str],
+) -> tuple[Optional[str], Optional[str]]:
+    normalized = _normalize_provider(provider)
+    if normalized not in _KEYED_PROVIDERS:
+        return None, None
+
+    explicit_api_key = (api_key or "").strip()
+    if explicit_api_key:
+        return explicit_api_key, "api_key"
+
+    credential_key = (credential_api_key or "").strip()
+    if credential_key:
+        return credential_key, "credential_ref"
+
+    env_key = resolve_provider_env_api_key(normalized)
+    if env_key:
+        return env_key, "environment"
+
+    return None, None
+
+
+def build_missing_api_key_message(provider: str) -> str:
+    normalized = _normalize_provider(provider)
+    provider_label = _PROVIDER_LABELS.get(normalized, normalized.capitalize())
+    env_var = provider_env_var_name(normalized)
+    if env_var:
+        return (
+            f"No API key available for {provider_label}. "
+            f"Provide API Key input, set credentialRef, or configure {env_var} in the backend environment."
+        )
+    return f"{provider_label} API key is required."
 
 
 def _normalize_base_url(base_url: Optional[str], default: str) -> str:
@@ -256,13 +325,17 @@ async def test_provider_configuration(
     resolved_api_key: Optional[str] = None,
 ) -> ProviderTestResponse:
     provider = _normalize_provider(payload.provider)
-    effective_api_key = (payload.api_key or resolved_api_key or "").strip()
+    effective_api_key, _source = resolve_effective_api_key(
+        provider=provider,
+        api_key=payload.api_key,
+        credential_api_key=resolved_api_key,
+    )
 
     try:
         if provider == "openai":
             if not effective_api_key:
                 return ProviderTestResponse(
-                    ok=False, message="OpenAI API key is required."
+                    ok=False, message=build_missing_api_key_message(provider)
                 )
             return await _check_openai_like(
                 provider_label="OpenAI",
@@ -275,7 +348,7 @@ async def test_provider_configuration(
         if provider == "openrouter":
             if not effective_api_key:
                 return ProviderTestResponse(
-                    ok=False, message="OpenRouter API key is required."
+                    ok=False, message=build_missing_api_key_message(provider)
                 )
             return await _check_openrouter(
                 api_key=effective_api_key,
@@ -288,7 +361,7 @@ async def test_provider_configuration(
         if provider == "anthropic":
             if not effective_api_key:
                 return ProviderTestResponse(
-                    ok=False, message="Anthropic API key is required."
+                    ok=False, message=build_missing_api_key_message(provider)
                 )
             return await _check_anthropic(
                 api_key=effective_api_key,
@@ -300,7 +373,7 @@ async def test_provider_configuration(
         if provider == "google":
             if not effective_api_key:
                 return ProviderTestResponse(
-                    ok=False, message="Google API key is required."
+                    ok=False, message=build_missing_api_key_message(provider)
                 )
             return await _check_google(
                 api_key=effective_api_key,
