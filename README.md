@@ -11,6 +11,12 @@ As ferramentas em destaque utilizadas para o desenvolvimento deste laboratório 
 - Opencode: Ferramentas auxiliares de integração local do IDE.
 - Openspec: Especificações em formato estruturado que servem de "Single Source of Truth" para o agente autônomo.
 
+Recomendamos o uso do **opencode**. Para habilitar as automações completas do agente (skills e fluxos de trabalho), instale as ferramentas necessárias executando o comando (lembrando que a pasta `.agents` não é versionada no repositório por ser grande):
+
+```ps1
+npx antigravity-awesome-skills --path .agents/skills
+```
+
 Nota: Este arquivo README foi exigido estritamente sem o uso de caracteres gráficos ("emojis") como parte das diretrizes de configuração deste repositório.
 
 ## Arquitetura
