@@ -5,6 +5,10 @@ import type { Team, TeamRun, TeamRunsGrouped } from '../api/client';
 import { useCanvasStore } from '../store/canvasStore';
 import type { AppNode } from '../store/canvasStore';
 import type { Edge } from '@xyflow/react';
+import Button from './ui/Button';
+import Card from './ui/Card';
+import FeatureListItem from './ui/FeatureListItem';
+import ProgressBar from './ui/ProgressBar';
 
 interface TeamManagerProps {
   onClose: () => void;
@@ -124,16 +128,16 @@ const TeamManager: React.FC<TeamManagerProps> = ({ onClose, onTeamLoaded }) => {
               placeholder="Description (optional)"
               value={saveDesc}
               onChange={(e) => setSaveDesc(e.target.value)}
-              style={{ marginTop: 8 }}
+              data-stack-gap="sm"
             />
-            <button
-              className="btn-primary"
+            <Button
+              variant="primary"
+              className="save-team-btn"
               onClick={handleSave}
               disabled={!saveName.trim() || saving}
-              style={{ marginTop: 10 }}
             >
               {saving ? 'Saving…' : 'Save Team'}
-            </button>
+            </Button>
           </div>
 
           {/* Load saved teams */}
@@ -144,36 +148,37 @@ const TeamManager: React.FC<TeamManagerProps> = ({ onClose, onTeamLoaded }) => {
               <div className="empty-state">No saved teams yet.</div>
             )}
             {teams.map((team) => (
-              <div key={team.id} className="team-card">
+              <Card key={team.id} className="team-card">
                 <div className="team-card-info">
-                  <div className="team-card-name">{team.name}</div>
-                  {team.description && (
-                    <div className="team-card-desc">{team.description}</div>
-                  )}
-                  <div className="team-card-meta">
-                    {team.graph_json.nodes?.length || 0} nodes · {team.graph_json.edges?.length || 0} edges
-                  </div>
+                  <FeatureListItem
+                    title={team.name}
+                    description={team.description || 'No description'}
+                    status={`${team.graph_json.nodes?.length || 0} nodes`}
+                    link={<span>{team.graph_json.edges?.length || 0} edges</span>}
+                  />
                 </div>
                 <div className="team-card-actions">
-                  <button
-                    className="btn-icon btn-view"
+                  <Button
+                    variant="icon"
+                    className="btn-view"
                     onClick={() => handleViewRuns(team)}
                     title="Runs"
                   >
                     Runs
-                  </button>
-                  <button className="btn-icon btn-load" onClick={() => handleLoad(team)} title="Load">
+                  </Button>
+                  <Button variant="icon" className="btn-load" onClick={() => handleLoad(team)} title="Load">
                     <FolderOpen size={14} />
-                  </button>
-                  <button
-                    className="btn-icon btn-delete"
+                  </Button>
+                  <Button
+                    variant="icon"
+                    className="btn-delete"
                     onClick={() => handleDelete(team.id)}
                     title="Delete"
                   >
                     <Trash2 size={14} />
-                  </button>
+                  </Button>
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
 
@@ -213,13 +218,17 @@ const TeamManager: React.FC<TeamManagerProps> = ({ onClose, onTeamLoaded }) => {
                 <div className="empty-state">No persisted runs yet for this team.</div>
               )}
               {!runsLoading && visibleRuns.map((run) => (
-                <div key={run.id} className="run-card">
+                <Card key={run.id} className="run-card">
                   <div className="run-card-meta">
                     <span>#{run.task_index + 1}</span>
                     <span className={`run-status ${run.status}`}>{run.status}</span>
                     <span title={run.execution_id}>Exec: {run.execution_id.slice(0, 8)}...</span>
                     <span>{new Date(run.created_at).toLocaleString()}</span>
                   </div>
+                  <ProgressBar
+                    value={run.status === 'completed' ? 100 : run.status === 'failed' ? 100 : 55}
+                    label={`Run ${run.task_index + 1} status`}
+                  />
                   {(run.source || run.trigger_id || run.correlation_id) && (
                     <div className="run-card-label">
                       Source: {run.source || 'task'}
@@ -253,7 +262,7 @@ const TeamManager: React.FC<TeamManagerProps> = ({ onClose, onTeamLoaded }) => {
                   {run.error_message && (
                     <div className="run-card-error">Error: {run.error_message}</div>
                   )}
-                </div>
+                </Card>
               ))}
             </div>
           )}

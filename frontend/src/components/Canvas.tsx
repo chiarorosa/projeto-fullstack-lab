@@ -15,6 +15,7 @@ import WebhookNode from './nodes/WebhookNode';
 import AgentNode from './nodes/AgentNode';
 import LLMNode from './nodes/LLMNode';
 import type { AppNode } from '../store/canvasStore';
+import { FLOW_THEME, NODE_TYPE_COLORS } from '../theme/tokens';
 
 const nodeTypes = {
   taskNode: TaskNode,
@@ -148,7 +149,7 @@ const Canvas: React.FC = () => {
         fitView
         defaultEdgeOptions={{
           animated: true,
-          style: { stroke: '#7c3aed', strokeWidth: 2 },
+          style: { stroke: FLOW_THEME.edgeStroke, strokeWidth: 2 },
         }}
         proOptions={{ hideAttribution: true }}
       >
@@ -156,18 +157,18 @@ const Canvas: React.FC = () => {
           variant={BackgroundVariant.Dots}
           gap={20}
           size={1}
-          color="rgba(255,255,255,0.06)"
+          color={FLOW_THEME.backgroundDots}
         />
         <Controls className="rf-controls" />
         <MiniMap
           nodeColor={(n) => {
-            if (n.type === 'taskNode') return '#14b8a6';
-            if (n.type === 'webhookNode') return '#f97316';
-            if (n.type === 'agentNode') return '#7c3aed';
-            if (n.type === 'llmNode') return '#10a37f';
-            return '#06b6d4';
+            if (n.type === 'taskNode') return NODE_TYPE_COLORS.task;
+            if (n.type === 'webhookNode') return NODE_TYPE_COLORS.webhook;
+            if (n.type === 'agentNode') return NODE_TYPE_COLORS.agent;
+            if (n.type === 'llmNode') return NODE_TYPE_COLORS.llm;
+            return NODE_TYPE_COLORS.tool;
           }}
-          maskColor="rgba(0,0,0,0.6)"
+          maskColor={FLOW_THEME.minimapMask}
           className="rf-minimap"
         />
       </ReactFlow>

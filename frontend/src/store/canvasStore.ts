@@ -11,6 +11,7 @@ import {
   applyNodeChanges,
   applyEdgeChanges,
 } from '@xyflow/react';
+import { FLOW_THEME } from '../theme/tokens';
 
 export type NodeType = 'taskNode' | 'webhookNode' | 'agentNode' | 'llmNode';
 
@@ -152,7 +153,7 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
 
   onConnect: (connection) =>
     set((state) => ({
-      edges: addEdge({ ...connection, animated: true, style: { stroke: '#7c3aed' } }, state.edges),
+      edges: addEdge({ ...connection, animated: true, style: { stroke: FLOW_THEME.edgeStroke } }, state.edges),
     })),
 
   setNodes: (nodes) => set({ nodes }),

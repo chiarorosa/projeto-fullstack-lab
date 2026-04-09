@@ -42,8 +42,7 @@ const AgentNode = memo(({ id, data, selected }: NodeProps) => {
         type="target"
         position={Position.Left}
         id="llm-in"
-        className="handle-left"
-        style={{ top: '50%' }}
+        className="handle-left handle-llm-in"
       />
       {/* Output to next agent */}
       <Handle type="source" position={Position.Bottom} className="handle-bottom" />
