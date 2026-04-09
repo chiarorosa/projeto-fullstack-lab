@@ -18,6 +18,7 @@ Recomendamos o uso do **Opencode**. Para habilitar integralmente as automações
 
 ```ps1
 npx antigravity-awesome-skills --path .agents/skills
+```
 
 ## Arquitetura
 
