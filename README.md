@@ -4,20 +4,20 @@ Este é um repositório contendo uma aplicação Fullstack (Frontend e Backend) 
 
 ## Sobre o Projeto
 
-Este projeto tem como objetivo principal demonstrar um caso de estudo de desenvolvimento orientado a especificações (Spec-Driven Development - SDD). Todo o ciclo de vida deste projeto está sendo guiado pela abordagem de SDD em conjunto com tecnologias avançadas de agentes autônomos.
+Este projeto tem como propósito apresentar, na prática, um estudo de caso baseado em desenvolvimento orientado a especificações (*Spec-Driven Development* — SDD). Ao longo de todo o seu ciclo de vida, as decisões de implementação, evolução e automação são conduzidas por essa abordagem, em conjunto com o uso de tecnologias avançadas baseadas em agentes autônomos.
 
-As ferramentas em destaque utilizadas para o desenvolvimento deste laboratório incluem:
-- Antigravity: Agente de IA avançado para automação e paridade de programação.
-- Opencode: Ferramentas auxiliares de integração local do IDE.
-- Openspec: Especificações em formato estruturado que servem de "Single Source of Truth" para o agente autônomo.
+Entre as principais ferramentas utilizadas neste laboratório, destacam-se:
 
-Recomendamos o uso do **opencode**. Para habilitar as automações completas do agente (skills e fluxos de trabalho), instale as ferramentas necessárias executando o comando (lembrando que a pasta `.agents` não é versionada no repositório por ser grande):
+- **Antigravity**: agente de IA avançado voltado à automação de tarefas e à programação assistida com alta paridade de execução.
+- **Opencode**: conjunto de ferramentas auxiliares para integração local com o IDE.
+- **Openspec**: especificações estruturadas que atuam como fonte única de verdade (*Single Source of Truth*) para orientar o agente autônomo.
+
+Recomendamos o uso do **Opencode**. Para habilitar integralmente as automações do agente, incluindo *skills* e fluxos de trabalho, é necessário instalar os recursos adicionais com o comando abaixo.
+
+> **Observação:** a pasta `.agents` não é versionada neste repositório, pois possui volume elevado de arquivos.
 
 ```ps1
 npx antigravity-awesome-skills --path .agents/skills
-```
-
-Nota: Este arquivo README foi exigido estritamente sem o uso de caracteres gráficos ("emojis") como parte das diretrizes de configuração deste repositório.
 
 ## Arquitetura
 
