@@ -56,6 +56,10 @@ export interface TeamRun {
     activated_agents?: { id?: string; agent?: string }[];
     skipped_agents?: { id?: string; agent?: string; reason?: string }[];
   } | null;
+  source?: 'task' | 'webhook' | string;
+  trigger_id?: string | null;
+  trigger_timestamp?: string | null;
+  correlation_id?: string | null;
   created_at: string;
 }
 
@@ -88,6 +92,27 @@ export interface ProviderTestResponse {
 export interface ExecutePayload {
   task_input?: string;
   task_inputs?: string[];
+}
+
+export interface WebhookTestRequest {
+  webhookId: string;
+  body: string;
+  headers?: Record<string, string>;
+  correlationId?: string;
+}
+
+export interface WebhookTestResponse {
+  ok: boolean;
+  status: number;
+  latencyMs: number;
+  responseHeaders: Record<string, string>;
+  responseBody: unknown;
+  rawBody: string;
+  executionId?: string;
+  correlationId?: string;
+  triggerId?: string;
+  acceptedAt?: string;
+  message?: string;
 }
 
 export const teamsApi = {
@@ -132,8 +157,23 @@ export async function executeTeamStream(
       body: JSON.stringify(payload),
     });
 
-    if (!response.ok || !response.body) {
-      throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      let backendDetail = '';
+      try {
+        const payload = await response.json();
+        const detail =
+          (typeof payload?.detail === 'string' && payload.detail) ||
+          (typeof payload?.message === 'string' && payload.message) ||
+          '';
+        backendDetail = detail ? `: ${detail}` : '';
+      } catch {
+        backendDetail = '';
+      }
+      throw new Error(`HTTP ${response.status}${backendDetail}`);
+    }
+
+    if (!response.body) {
+      throw new Error('Execution stream unavailable: empty response body.');
     }
 
     const reader = response.body.getReader();
@@ -161,6 +201,82 @@ export async function executeTeamStream(
   } catch (err) {
     onError?.(err);
   }
+}
+
+function parseJsonIfPossible(text: string): unknown {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+export async function triggerWebhookTest(
+  payload: WebhookTestRequest
+): Promise<WebhookTestResponse> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-test-origin': 'in-app-webhook-console',
+    ...(payload.headers || {}),
+  };
+
+  if (!headers['Content-Type'] && !headers['content-type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  if (API_BEARER_TOKEN) {
+    headers.Authorization = `Bearer ${API_BEARER_TOKEN}`;
+  }
+
+  if (payload.correlationId) {
+    headers['x-correlation-id'] = payload.correlationId;
+  }
+
+  const startedAt = performance.now();
+  const response = await fetch(`${API_BASE_URL}/api/webhooks/${payload.webhookId}`, {
+    method: 'POST',
+    headers,
+    body: payload.body,
+  });
+  const latencyMs = Math.max(0, performance.now() - startedAt);
+
+  const rawBody = await response.text();
+  const parsedBody = parseJsonIfPossible(rawBody);
+  const responseHeaders: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    responseHeaders[key] = value;
+  });
+
+  let executionId: string | undefined;
+  let correlationId: string | undefined;
+  let triggerId: string | undefined;
+  let acceptedAt: string | undefined;
+  let message: string | undefined;
+
+  if (parsedBody && typeof parsedBody === 'object') {
+    const bodyObj = parsedBody as Record<string, unknown>;
+    executionId = typeof bodyObj.execution_id === 'string' ? bodyObj.execution_id : undefined;
+    correlationId = typeof bodyObj.correlation_id === 'string' ? bodyObj.correlation_id : undefined;
+    triggerId = typeof bodyObj.trigger_id === 'string' ? bodyObj.trigger_id : undefined;
+    acceptedAt = typeof bodyObj.accepted_at === 'string' ? bodyObj.accepted_at : undefined;
+    message = typeof bodyObj.message === 'string' ? bodyObj.message : undefined;
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    latencyMs,
+    responseHeaders,
+    responseBody: parsedBody,
+    rawBody,
+    executionId,
+    correlationId,
+    triggerId,
+    acceptedAt,
+    message,
+  };
 }
 
 export default api;

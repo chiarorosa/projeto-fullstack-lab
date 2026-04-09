@@ -44,4 +44,19 @@ class TeamRun(Base):
     routing_reason = Column(Text, nullable=True)
     decision_json = Column(Text, nullable=True)
     routing_json = Column(Text, nullable=True)
+    source = Column(String(32), nullable=True, default="task")
+    trigger_id = Column(String(255), nullable=True)
+    trigger_timestamp = Column(DateTime, nullable=True)
+    correlation_id = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class WebhookTrigger(Base):
+    __tablename__ = "webhook_triggers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    webhook_id = Column(String(255), unique=True, index=True, nullable=False)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False, index=True)
+    node_id = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

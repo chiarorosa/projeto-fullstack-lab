@@ -2,19 +2,23 @@
 
 ## Purpose
 Define task-driven agent activation so execution starts from a Task Node, only eligible agents run, and task outcomes remain traceable in batch runs.
-
 ## Requirements
 ### Requirement: Task Node Bootstrap
-The system SHALL require a Task Node as the bootstrap source for execution input and task dispatch.
+The system SHALL require at least one valid supported bootstrap source for execution input and task dispatch.
 
 #### Scenario: Execution starts with valid Task Node
 - **WHEN** the graph contains a Task Node with at least one task item
 - **THEN** the backend uses Task Node payload as the source for execution input
 - **AND** execution can dispatch tasks to downstream agent flow
 
-#### Scenario: Execution requested without valid Task Node
-- **WHEN** the graph does not contain a valid Task Node
-- **THEN** the system returns an explicit validation error indicating Task Node is required
+#### Scenario: Execution starts with valid Webhook Node
+- **WHEN** the graph contains a Webhook Node registered as a valid bootstrap source
+- **THEN** the backend can start execution from webhook payload mapped into task input context
+- **AND** execution can dispatch tasks to downstream agent flow
+
+#### Scenario: Execution requested without valid bootstrap source
+- **WHEN** the graph does not contain a valid Task Node or valid Webhook Node bootstrap source
+- **THEN** the system returns an explicit validation error indicating at least one supported bootstrap source is required
 
 ### Requirement: Agent Activation Requires Connected LLM Node
 The system SHALL only activate agents that have a valid connected LLM node in the compiled graph.
@@ -48,3 +52,4 @@ The system SHALL preserve traceability of outputs for each task item in batch ex
 - **WHEN** backend processes a batch request
 - **THEN** each emitted event includes task index or task identifier context
 - **AND** final output state identifies completion per task item
+

@@ -3,8 +3,9 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from models.team import Team, TeamRun
+from sqlalchemy import select, delete
+from sqlalchemy.exc import IntegrityError
+from models.team import Team, TeamRun, WebhookTrigger
 from models.schemas import (
     ExecuteRequest,
     ProviderTestRequest,
@@ -72,6 +73,12 @@ def _serialize_team_run(run: TeamRun) -> TeamRunResponse:
         routing_reason=redact_text(run.routing_reason) if run.routing_reason else None,
         decision_json=redact_payload(decision_payload),
         routing_json=redact_payload(routing_payload),
+        source=run.source or "task",
+        trigger_id=run.trigger_id,
+        trigger_timestamp=(
+            run.trigger_timestamp.isoformat() if run.trigger_timestamp else None
+        ),
+        correlation_id=run.correlation_id,
         created_at=run.created_at.isoformat(),
     )
 
@@ -115,6 +122,58 @@ def _friendly_execution_error(error_message: str) -> str:
     return text
 
 
+def _provider_test_indicates_key_is_valid(provider: str, message: str) -> bool:
+    normalized_provider = "openrouter" if provider == "opencode" else provider
+    text = (message or "").strip().lower()
+    if normalized_provider == "openrouter":
+        return "key is valid" in text and "model validation failed" in text
+    return False
+
+
+async def _sync_webhook_triggers(db: AsyncSession, team_id: int, graph: dict):
+    nodes = graph.get("nodes", [])
+    webhook_nodes = [n for n in nodes if n.get("type") == "webhookNode"]
+
+    await db.execute(delete(WebhookTrigger).where(WebhookTrigger.team_id == team_id))
+
+    for node in webhook_nodes:
+        data = node.get("data", {})
+        webhook_id = (data.get("webhookId") or "").strip()
+        node_id = str(node.get("id") or "").strip()
+        if webhook_id and node_id:
+            db.add(
+                WebhookTrigger(webhook_id=webhook_id, team_id=team_id, node_id=node_id)
+            )
+
+
+def _get_task_inputs_from_task_node(graph: dict) -> list[str]:
+    graph_nodes = graph.get("nodes", [])
+    task_nodes = [n for n in graph_nodes if n.get("type") == "taskNode"]
+    if not task_nodes:
+        return []
+
+    task_node_data = task_nodes[0].get("data", {})
+    node_task_input = str(task_node_data.get("taskInput") or "").strip()
+    node_task_inputs = [
+        str(item).strip()
+        for item in (task_node_data.get("taskInputs") or [])
+        if str(item).strip()
+    ]
+    return [item for item in [node_task_input, *node_task_inputs] if item]
+
+
+def _has_valid_webhook_bootstrap(graph: dict) -> bool:
+    nodes = graph.get("nodes", [])
+    for node in nodes:
+        if node.get("type") != "webhookNode":
+            continue
+        data = node.get("data") or {}
+        webhook_id = str(data.get("webhookId") or "").strip()
+        if webhook_id:
+            return True
+    return False
+
+
 @router.get("/", response_model=list[TeamResponse])
 async def list_teams(
     _auth: None = Depends(require_bearer_token),
@@ -152,8 +211,19 @@ async def create_team(
         graph_json=json.dumps(transformed_graph),
     )
     db.add(team)
-    await db.commit()
+    await db.flush()
+
+    try:
+        await _sync_webhook_triggers(db, int(team.id), transformed_graph)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Webhook identifier already exists. Regenerate webhook id and try again.",
+        )
     await db.refresh(team)
+
     return TeamResponse(
         id=team.id,
         name=team.name,
@@ -205,7 +275,18 @@ async def update_team(
             payload.graph_json,
         )
         team.graph_json = json.dumps(transformed_graph)
-    await db.commit()
+        try:
+            await _sync_webhook_triggers(db, team.id, transformed_graph)
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail="Webhook identifier already exists. Regenerate webhook id and try again.",
+            )
+    else:
+        await db.commit()
+
     await db.refresh(team)
     return TeamResponse(
         id=team.id,
@@ -227,6 +308,7 @@ async def delete_team(
     team = result.scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
+    await db.execute(delete(WebhookTrigger).where(WebhookTrigger.team_id == team_id))
     await db.delete(team)
     await db.commit()
 
@@ -323,8 +405,8 @@ async def execute_team_route(
             status_code=400, detail="No agents found in this team graph."
         )
 
-    graph_nodes = graph.get("nodes", [])
-    task_nodes = [n for n in graph_nodes if n.get("type") == "taskNode"]
+    task_inputs_from_graph = _get_task_inputs_from_task_node(graph)
+    has_webhook_bootstrap = _has_valid_webhook_bootstrap(graph)
     task_inputs = payload.normalized_task_inputs()
 
     agent_llm_connections = [
@@ -340,23 +422,21 @@ async def execute_team_route(
         for agent in compiled.get("agents", [])
     ]
 
-    if task_nodes:
-        task_node_data = task_nodes[0].get("data", {})
-        node_task_input = (task_node_data.get("taskInput") or "").strip()
-        node_task_inputs = [
-            str(item).strip()
-            for item in (task_node_data.get("taskInputs") or [])
-            if str(item).strip()
-        ]
-        task_inputs = [item for item in [node_task_input, *node_task_inputs] if item]
+    if task_inputs_from_graph:
+        task_inputs = task_inputs_from_graph
     elif payload.task_inputs:
         pass
     elif payload.task_input:
         pass
+    elif has_webhook_bootstrap:
+        raise HTTPException(
+            status_code=400,
+            detail="No Task Node input provided. This graph can also be started via a Webhook Node trigger.",
+        )
     else:
         raise HTTPException(
             status_code=400,
-            detail="Task Node is required as bootstrap input source, or provide task_input/task_inputs for compatibility.",
+            detail="Execution requires at least one bootstrap source: Task Node with tasks or a configured Webhook Node.",
         )
 
     if not task_inputs:
@@ -376,7 +456,16 @@ async def execute_team_route(
         yield f"data: {json.dumps(redact_payload(compiled_summary_event))}\n\n"
 
         try:
-            async for chunk in execute_team_tasks(compiled, task_inputs):
+            async for chunk in execute_team_tasks(
+                compiled,
+                task_inputs,
+                execution_context={
+                    "source": "task",
+                    "trigger_id": None,
+                    "timestamp": None,
+                    "correlation_id": execution_id,
+                },
+            ):
                 if chunk.startswith("data: "):
                     payload_text = chunk[len("data: ") :].strip()
                     try:
@@ -481,6 +570,10 @@ async def execute_team_route(
                             selected_provider=snapshot["selected_provider"],
                             selected_model=snapshot["selected_model"],
                             routing_reason=snapshot["routing_reason"],
+                            source="task",
+                            trigger_id=None,
+                            trigger_timestamp=None,
+                            correlation_id=execution_id,
                             decision_json=(
                                 json.dumps(snapshot["decision_json"])
                                 if snapshot["decision_json"] is not None
@@ -529,12 +622,16 @@ async def test_llm_provider(
 
     node_id_value = str(payload.node_id or "").strip()
     has_persistence_context = payload.team_id is not None and bool(node_id_value)
-    if (
-        response.ok
-        and provider_requires_api_key(payload.provider)
+    should_persist_credential = (
+        provider_requires_api_key(payload.provider)
         and has_persistence_context
-        and effective_api_key
-    ):
+        and bool(effective_api_key)
+        and (
+            response.ok
+            or _provider_test_indicates_key_is_valid(payload.provider, response.message)
+        )
+    )
+    if should_persist_credential:
         try:
             credential_ref = await upsert_node_credential_ref_in_team_graph(
                 db,

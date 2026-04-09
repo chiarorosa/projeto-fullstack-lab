@@ -23,6 +23,10 @@ def _migrate_team_runs(sync_conn):
         "selected_model": "VARCHAR(255)",
         "routing_reason": "TEXT",
         "decision_json": "TEXT",
+        "source": "VARCHAR(32) DEFAULT 'task'",
+        "trigger_id": "VARCHAR(255)",
+        "trigger_timestamp": "DATETIME",
+        "correlation_id": "VARCHAR(64)",
     }
 
     for name, sql_type in needed_columns.items():

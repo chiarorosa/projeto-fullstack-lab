@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Cpu, ListTodo } from 'lucide-react';
+import { Bot, Cpu, ListTodo, Webhook } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import type { AppNode } from '../store/canvasStore';
 
@@ -13,6 +13,13 @@ const NODE_PALETTE = [
         icon: <ListTodo size={18} />,
         color: '#14b8a6',
         meta: { taskInput: '', taskInputs: [] },
+      },
+      {
+        type: 'webhookNode',
+        label: 'Webhook Node',
+        icon: <Webhook size={18} />,
+        color: '#f97316',
+        meta: { webhookId: '', method: 'POST' },
       },
     ],
   },
@@ -55,6 +62,8 @@ const SidebarPalette: React.FC = () => {
 
     if (item.type === 'taskNode') {
       nodeData = { label: item.label, taskInput: '', taskInputs: [] };
+    } else if (item.type === 'webhookNode') {
+      nodeData = { label: item.label, webhookId: '', method: 'POST' };
     } else if (item.type === 'agentNode') {
       nodeData = { label: item.label, role: 'New Agent', goal: '', backstory: '' };
     } else if (item.type === 'llmNode') {
